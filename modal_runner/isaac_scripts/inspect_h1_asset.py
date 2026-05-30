@@ -126,16 +126,17 @@ def main() -> None:
     parser.add_argument("--bundled-asset-dir", "--official-asset-root", default="")
     args = parser.parse_args()
 
-    roots = [
-        Path("/workspace"),
-        Path("/root"),
-        Path("/isaac-lab"),
-        Path("/opt"),
-        Path(os.environ.get("ISAACLAB_PATH", "/missing")),
-    ]
     bundled_asset_dir = Path(args.bundled_asset_dir) if args.bundled_asset_dir else None
-    if bundled_asset_dir:
-        roots.insert(0, bundled_asset_dir)
+    if bundled_asset_dir and bundled_asset_dir.exists():
+        roots = [bundled_asset_dir]
+    else:
+        roots = [
+            Path("/workspace"),
+            Path("/root"),
+            Path("/isaac-lab"),
+            Path("/opt"),
+            Path(os.environ.get("ISAACLAB_PATH", "/missing")),
+        ]
 
     matches = find_h1_usd(roots)
     task_asset = inspect_task_asset(args.task)
@@ -149,13 +150,14 @@ def main() -> None:
     if args.export_dir:
         export_report = export_asset_bundle(task_candidates + matches, Path(args.export_dir), bundled_asset_dir)
 
+    primary_bundled_asset = str(bundled_asset_path) if bundled_asset_path and bundled_asset_path.exists() else None
     report = {
         "robot_id": "unitree_h1",
         "task": args.task,
         "task_asset": task_asset,
         "usd_candidates": matches,
-        "bundled_asset_path": str(bundled_asset_path) if bundled_asset_path and bundled_asset_path.exists() else None,
-        "resolved_asset_path": task_candidates[0] if task_candidates else (matches[0] if matches else None),
+        "bundled_asset_path": primary_bundled_asset,
+        "resolved_asset_path": task_candidates[0] if task_candidates else primary_bundled_asset or (matches[0] if matches else None),
         "export": export_report,
         "asset_resolution_note": (
             "Isaac Lab simulation uses the task-configured H1 articulation. "

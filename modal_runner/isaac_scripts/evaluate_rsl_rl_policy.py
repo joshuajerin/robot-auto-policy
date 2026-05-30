@@ -45,13 +45,16 @@ def main() -> None:
 
     try:
         metrics = evaluate_policy(args_cli)
+        write_metrics(Path(args_cli.output), metrics)
     finally:
         simulation_app.close()
 
-    output = Path(args_cli.output)
+    print(json.dumps(metrics, indent=2, sort_keys=True), flush=True)
+
+
+def write_metrics(output: Path, metrics: dict[str, Any]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n")
-    print(json.dumps(metrics, indent=2, sort_keys=True), flush=True)
 
 
 def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:

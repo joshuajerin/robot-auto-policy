@@ -195,7 +195,16 @@ class ExperimentDB:
     def scenario_matrix(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """
-            SELECT s.scenario_id, s.difficulty, s.status, e.policy_id, e.success_rate, e.score, e.failure_modes_json
+            SELECT
+              s.scenario_id,
+              s.parent_scenario_id,
+              s.scenario_spec_json,
+              s.difficulty,
+              s.status,
+              e.policy_id,
+              e.success_rate,
+              e.score,
+              e.failure_modes_json
             FROM scenarios s
             LEFT JOIN scenario_evals e ON s.scenario_id = e.scenario_id
             ORDER BY s.difficulty, s.scenario_id
