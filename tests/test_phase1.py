@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-from modal_runner.phase1 import build_phase1_spec
+from modal_runner.phase1 import build_batch_specs, build_phase1_spec
 
 
 class Args:
@@ -37,3 +37,17 @@ def test_phase1_spec_embeds_style_context(tmp_path) -> None:
 
     assert spec["style_context"]["style"] == "upright human walk"
     assert spec["style_context_path"] == str(context_path)
+
+
+def test_batch_specs_fan_out_seeds() -> None:
+    args = Args()
+    args.num_runs = 3
+    args.seed_start = 50
+    specs = build_batch_specs(Path("configs/locomotion/phase1_h1.yaml"), "baseline_h1_batch", args)
+
+    assert [spec["experiment_id"] for spec in specs] == [
+        "baseline_h1_batch-seed-50",
+        "baseline_h1_batch-seed-51",
+        "baseline_h1_batch-seed-52",
+    ]
+    assert [spec["train"]["seed"] for spec in specs] == [50, 51, 52]

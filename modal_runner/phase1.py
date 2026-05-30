@@ -15,9 +15,9 @@ def build_phase1_spec(config_path: Path, experiment: str, overrides: argparse.Na
     config = yaml.safe_load(config_path.read_text())
     spec = {
         "experiment_id": experiment,
-        "task": overrides.task or config["task"],
-        "runner": overrides.runner or config.get("runner", "rsl_rl"),
-        "device": overrides.device or config.get("device", "cuda:0"),
+        "task": getattr(overrides, "task", "") or config["task"],
+        "runner": getattr(overrides, "runner", "") or config.get("runner", "rsl_rl"),
+        "device": getattr(overrides, "device", "") or config.get("device", "cuda:0"),
         "robot_spec": config.get("robot_spec", "assets/h1_robot_spec.json"),
         "train": dict(config.get("train", {})),
         "eval": dict(config.get("eval", {})),
@@ -27,15 +27,27 @@ def build_phase1_spec(config_path: Path, experiment: str, overrides: argparse.Na
     if style_context:
         spec["style_context"] = json.loads(Path(style_context).read_text())
         spec["style_context_path"] = style_context
-    if overrides.num_envs is not None:
+    if getattr(overrides, "num_envs", None) is not None:
         spec["train"]["num_envs"] = overrides.num_envs
-    if overrides.max_iterations is not None:
+    if getattr(overrides, "max_iterations", None) is not None:
         spec["train"]["max_iterations"] = overrides.max_iterations
-    if overrides.seed is not None:
+    if getattr(overrides, "seed", None) is not None:
         spec["train"]["seed"] = overrides.seed
-    if overrides.video_length is not None:
+    if getattr(overrides, "video_length", None) is not None:
         spec["render"]["video_length"] = overrides.video_length
     return spec
+
+
+def build_batch_specs(config_path: Path, experiment: str, overrides: argparse.Namespace) -> list[dict[str, Any]]:
+    count = max(1, int(getattr(overrides, "num_runs", 1)))
+    seed_start = int(getattr(overrides, "seed_start", 42))
+    specs: list[dict[str, Any]] = []
+    for index in range(count):
+        run_args = argparse.Namespace(**vars(overrides))
+        run_args.seed = seed_start + index
+        run_experiment = f"{experiment}-seed-{run_args.seed}" if count > 1 else experiment
+        specs.append(build_phase1_spec(config_path, run_experiment, run_args))
+    return specs
 
 
 def main() -> None:
@@ -48,14 +60,16 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--max-iterations", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--seed-start", type=int, default=42)
+    parser.add_argument("--num-runs", type=int, default=1)
     parser.add_argument("--video-length", type=int)
     parser.add_argument("--style-context", default="")
     parser.add_argument("--launch-modal", action="store_true")
     parser.add_argument("--detach", action="store_true")
     args = parser.parse_args()
 
-    spec = build_phase1_spec(Path(args.config), args.experiment, args)
-    spec_json = json.dumps(spec, sort_keys=True)
+    specs = build_batch_specs(Path(args.config), args.experiment, args)
+    spec_json = json.dumps(specs if args.num_runs > 1 else specs[0], sort_keys=True)
 
     if args.launch_modal:
         command = [
@@ -66,7 +80,7 @@ def main() -> None:
             [
                 "modal_runner/modal_app.py",
                 "--action",
-                "phase1-detach" if args.detach else "phase1",
+                "phase1-batch-detach" if args.detach and args.num_runs > 1 else ("phase1-detach" if args.detach else "phase1"),
                 "--experiment-spec-json",
                 spec_json,
             ]
@@ -77,7 +91,7 @@ def main() -> None:
         )
         return
 
-    print(json.dumps(spec, indent=2, sort_keys=True))
+    print(json.dumps(specs if args.num_runs > 1 else specs[0], indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ stretch_task: Isaac-Velocity-Rough-H1-v0
 runner: rsl_rl
 device: cuda:0
 train:
-  num_envs: 4096
+  num_envs: 8192
   max_iterations: 1000
   seed: 42
   video: false
@@ -24,3 +24,7 @@ render:
 artifacts:
   modal_volume: robogenesis-runs
   experiment_root: /runs/experiments
+autoscale:
+  gpu: H100
+  max_phase1_containers: 4
+  notes: "Batch launch fans out independent seeds across Modal containers. Increase max_phase1_containers only with explicit spend intent."

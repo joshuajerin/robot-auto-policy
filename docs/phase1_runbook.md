@@ -64,6 +64,30 @@ The style context is copied into the Modal artifact directory as
 `--detach` uses a Modal `spawn()` call and returns a function call id, so the
 training input is not tied to the local log tail.
 
+## Autoscaled Batch
+
+The Modal app is configured for up to four concurrent phase-1 containers using
+H100 GPUs by default.
+
+```bash
+python modal_runner/phase1.py \
+  --experiment baseline_h1_normal_walk \
+  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --num-runs 4 \
+  --seed-start 42 \
+  --launch-modal \
+  --detach
+```
+
+This launches:
+
+```text
+baseline_h1_normal_walk-seed-42
+baseline_h1_normal_walk-seed-43
+baseline_h1_normal_walk-seed-44
+baseline_h1_normal_walk-seed-45
+```
+
 Equivalent explicit Modal command:
 
 ```bash

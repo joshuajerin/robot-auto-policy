@@ -108,6 +108,18 @@ python modal_runner/phase1.py \
   --detach
 ```
 
+Autoscaled multi-seed launch:
+
+```bash
+python modal_runner/phase1.py \
+  --experiment baseline_h1_normal_walk \
+  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --num-runs 4 \
+  --seed-start 42 \
+  --launch-modal \
+  --detach
+```
+
 That Modal job uses `Isaac-Velocity-Flat-H1-v0`, trains with `rsl_rl`, resolves
 the H1 asset inside the Isaac Lab container, evaluates fixed held-out seeds,
 renders an actual H1 rollout video, and writes:

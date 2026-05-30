@@ -15,9 +15,12 @@ import modal
 
 APP_NAME = "robogenesis-isaac-autoresearch"
 ISAAC_LAB_IMAGE = "nvcr.io/nvidia/isaac-lab:2.0.2"
-DEFAULT_GPU = "A10G"
-CPU_COUNT = 16.0
-MEMORY_MB = 131_072
+DEFAULT_GPU = "H100"
+RENDER_GPU_FALLBACKS = ["L40S", "A100-80GB", "A100-40GB", "A100", "H100", "H200", "A10G", "L4"]
+CPU_COUNT = 32.0
+MEMORY_MB = 262_144
+MAX_PHASE1_CONTAINERS = 4
+SCALEDOWN_WINDOW_SECONDS = 300
 TIMEOUT_SECONDS = 6 * 60 * 60
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REMOTE_SCRIPT_ROOT = Path("/robogenesis/isaac_scripts")
@@ -181,7 +184,17 @@ def _clamp01(value: Any) -> float:
     return max(0.0, min(1.0, number))
 
 
-@app.function(image=image, gpu=DEFAULT_GPU, cpu=CPU_COUNT, memory=MEMORY_MB, timeout=30 * 60, volumes=volumes)
+@app.function(
+    image=image,
+    gpu=DEFAULT_GPU,
+    cpu=CPU_COUNT,
+    memory=MEMORY_MB,
+    timeout=30 * 60,
+    volumes=volumes,
+    min_containers=0,
+    max_containers=1,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+)
 def smoke_test() -> str:
     _run(["nvidia-smi"], cwd=Path("/"))
     root = _isaac_lab_root()
@@ -189,7 +202,17 @@ def smoke_test() -> str:
     return f"Isaac Lab smoke test passed at {root}"
 
 
-@app.function(image=image, gpu=DEFAULT_GPU, cpu=CPU_COUNT, memory=MEMORY_MB, timeout=TIMEOUT_SECONDS, volumes=volumes)
+@app.function(
+    image=image,
+    gpu=DEFAULT_GPU,
+    cpu=CPU_COUNT,
+    memory=MEMORY_MB,
+    timeout=TIMEOUT_SECONDS,
+    volumes=volumes,
+    min_containers=0,
+    max_containers=MAX_PHASE1_CONTAINERS,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+)
 def train_and_eval_job(experiment_spec_json: str) -> dict[str, Any]:
     spec = json.loads(experiment_spec_json)
     experiment_id = _safe_name(str(spec.get("experiment_id", "experiment")))
@@ -228,7 +251,17 @@ def train_and_eval_job(experiment_spec_json: str) -> dict[str, Any]:
     }
 
 
-@app.function(image=image, gpu=DEFAULT_GPU, cpu=CPU_COUNT, memory=MEMORY_MB, timeout=24 * 60 * 60, volumes=volumes)
+@app.function(
+    image=image,
+    gpu=DEFAULT_GPU,
+    cpu=CPU_COUNT,
+    memory=MEMORY_MB,
+    timeout=24 * 60 * 60,
+    volumes=volumes,
+    min_containers=0,
+    max_containers=MAX_PHASE1_CONTAINERS,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+)
 def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
     """Run the full phase-1 H1 baseline: train, evaluate, render, manifest."""
 
@@ -400,4 +433,26 @@ def main(action: str = "smoke", experiment_spec_json: str = "{}") -> None:
         call = phase1_baseline_job.spawn(experiment_spec_json)
         print(json.dumps({"function_call_id": call.object_id, "status": "spawned"}, indent=2, sort_keys=True))
         return
-    raise ValueError("action must be 'smoke', 'train-and-eval', 'phase1', or 'phase1-detach'")
+    if action == "phase1-batch-detach":
+        specs = json.loads(experiment_spec_json)
+        if not isinstance(specs, list):
+            raise ValueError("phase1-batch-detach expects experiment_spec_json to be a JSON list")
+        calls = []
+        for spec in specs:
+            calls.append(phase1_baseline_job.spawn(json.dumps(spec, sort_keys=True)))
+        print(
+            json.dumps(
+                {
+                    "status": "spawned",
+                    "max_containers": MAX_PHASE1_CONTAINERS,
+                    "gpu": DEFAULT_GPU,
+                    "function_call_ids": [call.object_id for call in calls],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    raise ValueError(
+        "action must be 'smoke', 'train-and-eval', 'phase1', 'phase1-detach', or 'phase1-batch-detach'"
+    )
