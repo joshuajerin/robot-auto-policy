@@ -1,0 +1,15 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    doc = "Lightweight reference stage for the Isaac Lab Unitree H1 asset. The Modal runner resolves the concrete USD path inside the Isaac Lab container."
+)
+
+def Xform "World"
+{
+    def Xform "H1_Resolved_By_Isaac_Lab"
+    {
+        custom string robogenesis_task = "Isaac-Velocity-Flat-H1-v0"
+        custom string robogenesis_robot_id = "unitree_h1"
+        custom string robogenesis_asset_resolution = "Use modal_runner/isaac_scripts/inspect_h1_asset.py inside the Isaac Lab container."
+    }
+}

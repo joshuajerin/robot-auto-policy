@@ -1,0 +1,26 @@
+phase: 1
+experiment_prefix: baseline_h1
+robot_spec: assets/h1_robot_spec.json
+task: Isaac-Velocity-Flat-H1-v0
+stretch_task: Isaac-Velocity-Rough-H1-v0
+runner: rsl_rl
+device: cuda:0
+train:
+  num_envs: 4096
+  max_iterations: 1000
+  seed: 42
+  video: false
+  command_timeout_seconds: 0
+eval:
+  num_envs: 32
+  episodes_per_seed: 4
+  max_steps_per_episode: 1000
+  seeds: [101, 203, 307, 409, 503, 601, 709, 811]
+render:
+  num_envs: 1
+  video_length: 240
+  seed: 907
+  checkpoint: latest
+artifacts:
+  modal_volume: robogenesis-runs
+  experiment_root: /runs/experiments
