@@ -7,6 +7,7 @@ tests, demos, and offline development.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from adapters.locomotion.adapter import LocomotionAdapter
@@ -126,6 +127,12 @@ def _primary_failure(context: dict[str, Any]) -> str:
     if isinstance(latest, dict):
         report_json = latest.get("failure_report_json")
         if isinstance(report_json, str):
+            try:
+                decoded = json.loads(report_json)
+            except json.JSONDecodeError:
+                decoded = {}
+            if isinstance(decoded, dict) and isinstance(decoded.get("primary_failure"), str):
+                return decoded["primary_failure"]
             for token in [
                 "toe_drag",
                 "foot_slip",
@@ -140,4 +147,3 @@ def _primary_failure(context: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value
     return "command_tracking_failure"
-

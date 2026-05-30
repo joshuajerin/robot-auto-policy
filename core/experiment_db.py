@@ -187,7 +187,7 @@ class ExperimentDB:
 
     def recent_experiments(self, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT * FROM experiments ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM experiments ORDER BY rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [_row_to_dict(row) for row in rows]
@@ -205,7 +205,7 @@ class ExperimentDB:
 
     def recent_failures(self, limit: int = 5) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT * FROM failure_reports ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM failure_reports ORDER BY rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [_row_to_dict(row) for row in rows]
@@ -213,4 +213,3 @@ class ExperimentDB:
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
-
