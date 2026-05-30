@@ -72,3 +72,15 @@ def test_batch_specs_fan_out_seeds() -> None:
         "baseline_h1_batch-seed-52",
     ]
     assert [spec["train"]["seed"] for spec in specs] == [50, 51, 52]
+
+
+def test_single_batch_spec_preserves_explicit_seed() -> None:
+    args = Args()
+    args.num_runs = 1
+    args.seed = 400
+    args.seed_start = 50
+
+    specs = build_batch_specs(Path("configs/locomotion/phase1_h1.yaml"), "baseline_h1_single", args)
+
+    assert specs[0]["experiment_id"] == "baseline_h1_single"
+    assert specs[0]["train"]["seed"] == 400

@@ -57,7 +57,8 @@ def build_batch_specs(config_path: Path, experiment: str, overrides: argparse.Na
     specs: list[dict[str, Any]] = []
     for index in range(count):
         run_args = argparse.Namespace(**vars(overrides))
-        run_args.seed = seed_start + index
+        if count > 1 or getattr(run_args, "seed", None) is None:
+            run_args.seed = seed_start + index
         run_experiment = f"{experiment}-seed-{run_args.seed}" if count > 1 else experiment
         specs.append(build_phase1_spec(config_path, run_experiment, run_args))
     return specs
