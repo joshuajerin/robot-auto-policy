@@ -41,6 +41,103 @@ dashboard/                 Lightweight Streamlit dashboard skeleton
 tests/                     Unit tests for local deterministic components
 ```
 
+## Project Layout
+
+This repository is organized around a constrained robotics AutoResearch loop.
+The first target is H1 humanoid locomotion in Isaac Lab, with Modal providing
+GPU execution.
+
+### Top-Level Files
+
+- `README.md` - project overview, quickstart commands, and run instructions.
+- `program.md` - operating rules for the autonomous research agent, including
+  editable files, locked files, safety rules, and acceptance criteria.
+- `pyproject.toml` - Python package metadata and dependencies.
+- `.env.example` - local environment template for `OPENAI_API_KEY` and
+  `OPENAI_MODEL`.
+
+### Configs And Assets
+
+- `configs/locomotion/phase1_h1.yaml` - phase-1 H1 baseline config: task,
+  runner, train/eval/render settings, Modal volume metadata, and autoscale
+  notes.
+- `configs/locomotion/rewards.yaml` - editable locomotion reward weights.
+- `configs/locomotion/curriculum.yaml` - editable curriculum knobs.
+- `configs/locomotion/domain_randomization.yaml` - editable friction, push,
+  payload, motor strength, and action delay settings.
+- `configs/locomotion/actuators.yaml` - safe actuator scaling config.
+- `configs/locomotion/ppo.yaml` - PPO settings.
+- `configs/locomotion/terrain.yaml` - terrain config for generated challenges.
+- `configs/locomotion/eval.yaml` - evaluation config.
+- `assets/h1_robot_spec.json` - Unitree H1 robot spec used by the orchestration
+  layer.
+- `assets/h1_isaac_reference.usda` - lightweight reference stub; the actual H1
+  USD is resolved inside the Isaac Lab container.
+
+### Modal And Isaac Execution
+
+- `modal_runner/modal_app.py` - Modal app with H1 train/evaluate/render
+  functions, artifact syncing, scoring, and manifest creation.
+- `modal_runner/phase1.py` - CLI for generating phase-1 specs and launching H1
+  runs locally, detached, batched, or through the deployed app.
+- `modal_runner/train.py` - helper for building training specs.
+- `modal_runner/evaluate.py` - helper for scoring raw metrics files.
+- `modal_runner/render.py` - helper for rollout render specs.
+- `modal_runner/isaac_scripts/inspect_h1_asset.py` - runs inside Isaac Lab to
+  report H1 asset resolution.
+- `modal_runner/isaac_scripts/evaluate_rsl_rl_policy.py` - evaluates an rsl_rl
+  checkpoint on fixed seeds.
+- `modal_runner/isaac_scripts/write_artifact_manifest.py` - writes the final
+  experiment artifact manifest.
+
+### AutoResearch Core
+
+- `core/autoresearch_loop.py` - local dry-run AutoResearch loop.
+- `core/experiment_db.py` - SQLite research memory for experiments, policies,
+  scenarios, scenario evals, and failure reports.
+- `core/patch_validator.py` - deterministic `PatchSpec` validator and safe YAML
+  patcher.
+- `core/scoring.py` - locked locomotion score and accept/reject rule.
+- `core/schemas.py` - shared dataclasses for robot/task/scenario/patch/score
+  objects.
+
+### Agents And Adapters
+
+- `adapters/base.py` - generic `TaskAdapter` protocol.
+- `adapters/locomotion/adapter.py` - locomotion task adapter.
+- `adapters/locomotion/scenario_generator.py` - generated locomotion challenge
+  specs.
+- `adapters/locomotion/failure_diagnosis.py` - metric-based locomotion failure
+  taxonomy.
+- `adapters/locomotion/metrics.py` - locomotion score adapter.
+- `adapters/manipulation/` - stub for future manipulation support.
+- `agents/planner.py` - deterministic fallback research planner.
+- `agents/openai_client.py` - OpenAI Responses API structured-output helper.
+- `agents/openai_planner.py` - OpenAI-backed `PatchSpec` planner.
+- `agents/reviewer.py` - candidate policy reviewer.
+- `agents/scenario_agent.py` - scenario generation wrapper.
+- `agents/video_context.py` - normal-walking video style context extraction.
+- `agents/prompts/` - planner, reviewer, failure diagnosis, and scenario
+  prompts.
+
+### Evaluation, Dashboard, Tools, And Tests
+
+- `eval/fixed_eval_seeds.json` - locked held-out evaluation seeds.
+- `eval/locomotion_score.py` - CLI wrapper for locked scoring.
+- `eval/safety_checks.py` - safety checks outside the editable agent surface.
+- `dashboard/app.py` - Streamlit dashboard skeleton for research memory.
+- `dashboard/components/` - dashboard loaders for experiments, metrics,
+  scenarios, and rollout videos.
+- `tools/prepare_video_prompt.py` - prepares a walking-video style context
+  artifact.
+- `specs/` - JSON Schemas for `RobotSpec`, `TaskSpec`, `ScenarioSpec`,
+  `PatchSpec`, and `EvalSpec`.
+- `docs/phase1_runbook.md` - full H1 phase-1 runbook.
+- `docs/openai_setup.md` - OpenAI key/model setup.
+- `docs/implementation_log.md` - implementation history.
+- `tests/` - unit tests for patch safety, scoring, scenarios, DB, phase-1
+  specs, video context, OpenAI fallback, and dry-run orchestration.
+
 ## Local Dry Run
 
 The local loop does not require Isaac Lab. It validates patch safety, generates scenarios, computes deterministic toy metrics, applies the accept/reject rule, and records lineage.
