@@ -45,7 +45,6 @@ def main() -> None:
 
     try:
         metrics = evaluate_policy(args_cli)
-        write_metrics(Path(args_cli.output), metrics)
     finally:
         simulation_app.close()
 
@@ -148,6 +147,7 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
                     print(f"[WARN] env.close failed for seed {seed}: {type(exc).__name__}: {exc}", flush=True)
 
     metrics = aggregate.to_metrics()
+    write_metrics(Path(args_cli.output), metrics)
     if args_cli.trace_output:
         trace_recorder.write(Path(args_cli.trace_output), metrics=metrics)
     return metrics
