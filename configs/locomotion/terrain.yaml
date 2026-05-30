@@ -1,0 +1,7 @@
+terrain:
+  type: flat
+  height_noise_m: 0.0
+  slope_range_deg: [-2.0, 2.0]
+  rough_heightfield_enabled: false
+  stairs_enabled: false
+  stepping_stones_enabled: false

@@ -1,0 +1,9 @@
+curriculum:
+  roughness_start: 0.0
+  roughness_end: 0.04
+  push_probability_start: 0.0
+  push_probability_end: 0.03
+  slope_start_deg: 0.0
+  slope_end_deg: 4.0
+  command_velocity_start: 0.4
+  command_velocity_end: 1.2

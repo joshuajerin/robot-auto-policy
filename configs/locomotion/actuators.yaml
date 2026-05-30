@@ -1,0 +1,7 @@
+actuators:
+  hip_action_scale: 0.5
+  knee_action_scale: 0.5
+  ankle_action_scale: 0.4
+  torque_limit_scale: 0.85
+  damping_scale: 1.0
+  stiffness_scale: 1.0

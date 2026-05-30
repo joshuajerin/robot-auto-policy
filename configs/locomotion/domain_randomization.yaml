@@ -1,0 +1,7 @@
+domain_randomization:
+  friction_range: [0.7, 1.2]
+  motor_strength_scale: [0.9, 1.1]
+  action_delay_steps: [0, 1]
+  payload_mass_kg: [0.0, 1.0]
+  push_force_range_n: [0, 40]
+  push_impulse_probability: 0.02

@@ -1,0 +1,9 @@
+ppo:
+  runner: rsl_rl
+  max_iterations: 1000
+  num_envs: 4096
+  learning_rate: 0.0003
+  entropy_coef: 0.01
+  clip_param: 0.2
+  gamma: 0.99
+  lam: 0.95

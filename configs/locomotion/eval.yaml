@@ -1,0 +1,11 @@
+num_episodes: 64
+seed_count: 8
+base_scenarios:
+  - flat_tracking
+  - flat_turning
+generated_scenarios:
+  - low_friction_walk
+  - side_push_recovery
+  - slope_up
+  - rough_heightfield_walk
+success_condition: walk_10m_without_falling

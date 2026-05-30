@@ -1,0 +1,11 @@
+reward_weights:
+  command_tracking: 1.0
+  survival: 0.8
+  stability: 0.6
+  foot_clearance: 0.2
+  torso_upright: 0.4
+  foot_slip_penalty: 0.25
+  energy_penalty: 0.05
+  smoothness: 0.1
+  recovery: 0.2
+  gait_symmetry: 0.2
