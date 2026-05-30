@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +67,12 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
         env = gym.make(args_cli.task, cfg=env_cfg)
         env = RslRlVecEnvWrapper(env)
 
-        runner = OnPolicyRunner(env, {}, log_dir=None, device=args_cli.device)
+        agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
+        runner_cfg = agent_cfg.to_dict() if agent_cfg is not None else {}
+        runner_device = getattr(agent_cfg, "device", args_cli.device) if agent_cfg is not None else args_cli.device
+        runner = OnPolicyRunner(env, runner_cfg, log_dir=None, device=runner_device)
         runner.load(args_cli.checkpoint)
-        policy = runner.get_inference_policy(device=args_cli.device)
+        policy = runner.get_inference_policy(device=env.unwrapped.device)
 
         obs, _ = env.get_observations()
         done_episodes = 0
@@ -111,6 +115,39 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
         env.close()
 
     return aggregate.to_metrics()
+
+
+def _load_rsl_rl_agent_cfg(args_cli: argparse.Namespace) -> Any | None:
+    """Load Isaac Lab's task-specific rsl_rl config when available."""
+
+    script_dir = Path.cwd() / "scripts" / "reinforcement_learning" / "rsl_rl"
+    if script_dir.exists():
+        sys.path.insert(0, str(script_dir))
+    try:
+        import cli_args  # type: ignore
+    except Exception as exc:
+        print(f"[WARN] Could not import rsl_rl cli_args, using runner defaults: {exc}", flush=True)
+        return None
+
+    cfg_args = argparse.Namespace(**vars(args_cli))
+    defaults = {
+        "experiment_name": None,
+        "run_name": None,
+        "resume": False,
+        "load_run": ".*",
+        "checkpoint": None,
+        "logger": None,
+        "log_project_name": None,
+        "device": args_cli.device,
+    }
+    for key, value in defaults.items():
+        if not hasattr(cfg_args, key):
+            setattr(cfg_args, key, value)
+    try:
+        return cli_args.parse_rsl_rl_cfg(args_cli.task, cfg_args)
+    except Exception as exc:
+        print(f"[WARN] Could not parse rsl_rl config, using runner defaults: {exc}", flush=True)
+        return None
 
 
 class MetricAccumulator:
@@ -231,4 +268,3 @@ def _squash(value: float) -> float:
 
 if __name__ == "__main__":
     main()
-
