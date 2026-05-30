@@ -368,28 +368,28 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
     score_path = artifact_root / "eval_metrics.json"
     score_path.write_text(json.dumps(score, indent=2, sort_keys=True) + "\n")
 
-    render_cmd = [
-        "./isaaclab.sh",
-        "-p",
-        f"scripts/reinforcement_learning/{runner}/play.py",
-        "--task",
-        task,
-        "--headless",
-        "--num_envs",
-        str(int(render_spec.get("num_envs", 1))),
-        "--load_run",
-        checkpoint_path.parent.name,
-        "--checkpoint",
-        checkpoint_path.name,
-        "--video",
-        "--video_length",
-        str(int(render_spec.get("video_length", 240))),
-        "--enable_cameras",
-    ]
-    render_seed = render_spec.get("seed")
-    if render_seed is not None:
-        render_cmd.extend(["--seed", str(render_seed)])
-    _run(_with_timeout(render_cmd, int(render_spec.get("command_timeout_seconds", 900))), ok_codes=(0, 124))
+    render_cmd = _build_render_cmd(
+        runner=runner,
+        task=task,
+        checkpoint_path=checkpoint_path,
+        render_spec=render_spec,
+    )
+    render_error_path = artifact_root / "render_error.json"
+    try:
+        _run(_with_timeout(render_cmd, int(render_spec.get("command_timeout_seconds", 900))), ok_codes=(0, 124))
+    except subprocess.CalledProcessError as exc:
+        render_error_path.write_text(
+            json.dumps(
+                {
+                    "command": exc.cmd,
+                    "returncode": exc.returncode,
+                    "note": "Render failed; preserving train/eval artifacts and manifest without rollout video.",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
 
     synced_root = Path(_sync_artifacts(experiment_id))
     rollout_video_path = _find_video(synced_root)
@@ -432,6 +432,34 @@ def _load_metrics_if_present(artifact_root: Path, experiment_id: str) -> dict[st
         "eval_seed_count": 0,
         "note": "Training artifacts synced; run evaluate.py or attach Isaac evaluator metrics.",
     }
+
+
+def _build_render_cmd(
+    *,
+    runner: str,
+    task: str,
+    checkpoint_path: Path,
+    render_spec: dict[str, Any],
+) -> list[str]:
+    # Isaac Lab rsl_rl/play.py does not accept a seed argument in 2.0.x.
+    return [
+        "./isaaclab.sh",
+        "-p",
+        f"scripts/reinforcement_learning/{runner}/play.py",
+        "--task",
+        task,
+        "--headless",
+        "--num_envs",
+        str(int(render_spec.get("num_envs", 1))),
+        "--load_run",
+        checkpoint_path.parent.name,
+        "--checkpoint",
+        checkpoint_path.name,
+        "--video",
+        "--video_length",
+        str(int(render_spec.get("video_length", 240))),
+        "--enable_cameras",
+    ]
 
 
 def _fallback_eval_metrics(experiment_id: str, reason: str) -> dict[str, Any]:

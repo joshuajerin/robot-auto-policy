@@ -14,6 +14,17 @@ def test_scan_for_modal_errors_matches_failure_lines() -> None:
     assert any("Traceback" in hit for hit in hits)
 
 
+def test_scan_for_modal_errors_matches_isaac_cli_argument_errors() -> None:
+    text = """
+    There was an error running python
+    play.py: error: unrecognized arguments: --seed 907
+    """
+
+    hits = scan_for_modal_errors(text)
+
+    assert any("unrecognized arguments" in hit for hit in hits)
+
+
 def test_scan_for_modal_errors_ignores_headless_isaac_warnings() -> None:
     text = """
     [Warning] [omni.platforminfo.plugin] failed to open the default display.

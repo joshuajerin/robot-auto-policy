@@ -36,6 +36,8 @@ ERROR_PATTERNS = (
     "HTTP Error",
     "InputCancellation",
     "CancelledError",
+    "There was an error running python",
+    "unrecognized arguments:",
     "Function failed",
     "Task failed",
     "Container failed",
