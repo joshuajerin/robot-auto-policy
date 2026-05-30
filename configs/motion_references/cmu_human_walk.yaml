@@ -1,0 +1,45 @@
+reference_id: cmu_human_walk_v1
+dataset_id: cmu_graphics_lab_mocap
+dataset_name: CMU Graphics Lab Motion Capture Database
+source_homepage: http://mocap.cs.cmu.edu/
+license_note: "CMU describes the database as free motions that can be downloaded and used."
+format: asf_amc
+sample_rate_hz: 120
+subject_id: "07"
+subject_note: "CMU subject 07 walking trials."
+style_context:
+  style: research_mocap_normal_walk
+  cadence_hz: 1.75
+  stride_symmetry: 0.92
+  stance_swing_ratio: 0.62
+  torso_lean: slight_forward
+  foot_clearance: moderate
+  arm_swing: natural
+  target_velocity_class: normal_walk
+  reward_bias:
+    torso_upright: high
+    gait_symmetry: high
+    smoothness: medium_high
+    foot_slip_penalty: high
+    energy_penalty: medium
+training_use:
+  phase1: "Style and reward-target conditioning only; no direct torque control or full retargeting."
+  phase2: "Parse mocap trajectories into gait phase, stride timing, and approximate H1-compatible style rewards."
+  phase3: "Retarget to H1 reference motion library for imitation or AMP-style training."
+motions:
+  - motion_id: "07_01"
+    description: walk
+    amc_url: http://mocap.cs.cmu.edu/subjects/07/07_01.amc
+    asf_url: http://mocap.cs.cmu.edu/subjects/07/07.asf
+  - motion_id: "07_02"
+    description: walk
+    amc_url: http://mocap.cs.cmu.edu/subjects/07/07_02.amc
+    asf_url: http://mocap.cs.cmu.edu/subjects/07/07.asf
+  - motion_id: "07_03"
+    description: walk
+    amc_url: http://mocap.cs.cmu.edu/subjects/07/07_03.amc
+    asf_url: http://mocap.cs.cmu.edu/subjects/07/07.asf
+  - motion_id: "07_12"
+    description: brisk_walk
+    amc_url: http://mocap.cs.cmu.edu/subjects/07/07_12.amc
+    asf_url: http://mocap.cs.cmu.edu/subjects/07/07.asf

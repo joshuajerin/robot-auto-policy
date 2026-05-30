@@ -137,6 +137,8 @@ def _score_metrics(raw_metrics: dict[str, Any]) -> dict[str, Any]:
     safety_reasons: list[str] = []
     if float(raw_metrics.get("fall_rate", 0.0)) > 0.35:
         safety_reasons.append("fall rate too high")
+    if raw_metrics.get("evaluation_errors"):
+        safety_reasons.append("evaluation emitted errors")
     if bool(raw_metrics.get("nan_actions", False)):
         safety_reasons.append("policy produced NaN actions")
     if float(raw_metrics.get("joint_limit_violation_rate", 0.0)) > 0.02:
@@ -280,6 +282,10 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         (artifact_root / "style_context.json").write_text(
             json.dumps(spec["style_context"], indent=2, sort_keys=True) + "\n"
         )
+    if spec.get("motion_context"):
+        (artifact_root / "motion_context.json").write_text(
+            json.dumps(spec["motion_context"], indent=2, sort_keys=True) + "\n"
+        )
 
     h1_report_path = artifact_root / "h1_asset_report.json"
     _run(
@@ -345,9 +351,19 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         "--policy-id",
         experiment_id,
     ]
-    _run(eval_cmd)
+    try:
+        _run(eval_cmd)
+    except subprocess.CalledProcessError as exc:
+        raw_metrics_path.write_text(
+            json.dumps(_fallback_eval_metrics(experiment_id, f"eval command failed with exit code {exc.returncode}"), indent=2, sort_keys=True)
+            + "\n"
+        )
 
-    raw_metrics = json.loads(raw_metrics_path.read_text())
+    if raw_metrics_path.exists():
+        raw_metrics = json.loads(raw_metrics_path.read_text())
+    else:
+        raw_metrics = _fallback_eval_metrics(experiment_id, "eval command completed without writing raw metrics")
+        raw_metrics_path.write_text(json.dumps(raw_metrics, indent=2, sort_keys=True) + "\n")
     score = _score_metrics(raw_metrics)
     score_path = artifact_root / "eval_metrics.json"
     score_path.write_text(json.dumps(score, indent=2, sort_keys=True) + "\n")
@@ -415,6 +431,31 @@ def _load_metrics_if_present(artifact_root: Path, experiment_id: str) -> dict[st
         "policy_id": experiment_id,
         "eval_seed_count": 0,
         "note": "Training artifacts synced; run evaluate.py or attach Isaac evaluator metrics.",
+    }
+
+
+def _fallback_eval_metrics(experiment_id: str, reason: str) -> dict[str, Any]:
+    return {
+        "policy_id": experiment_id,
+        "episode_count": 0,
+        "eval_seed_count": 0,
+        "completed_eval_seed_count": 0,
+        "evaluation_errors": [reason],
+        "mean_episode_reward": 0.0,
+        "mean_episode_length": 0.0,
+        "command_tracking": 0.0,
+        "survival_no_fall": 0.0,
+        "base_success": 0.0,
+        "stability": 0.0,
+        "generated_scenario_success": 0.0,
+        "gait_quality": 0.0,
+        "energy_efficiency": 0.0,
+        "smoothness": 0.0,
+        "recovery_from_disturbance": 0.0,
+        "fall_rate": 1.0,
+        "nan_actions": False,
+        "reward_hacking_detected": False,
+        "raw_metric_note": "Fallback metrics written because phase-1 evaluation did not produce a raw metrics file.",
     }
 
 

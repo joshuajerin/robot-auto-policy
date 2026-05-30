@@ -13,6 +13,7 @@ class Args:
     seed = 123
     video_length = 60
     style_context = ""
+    motion_context = ""
 
 
 def test_phase1_spec_uses_h1_task_and_overrides() -> None:
@@ -37,6 +38,26 @@ def test_phase1_spec_embeds_style_context(tmp_path) -> None:
 
     assert spec["style_context"]["style"] == "upright human walk"
     assert spec["style_context_path"] == str(context_path)
+
+
+def test_phase1_spec_embeds_motion_context_as_style_context(tmp_path) -> None:
+    context_path = tmp_path / "motion_context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "dataset_id": "cmu_graphics_lab_mocap",
+                "style_context": {"style": "research_mocap_normal_walk"},
+            }
+        )
+    )
+
+    args = Args()
+    args.motion_context = str(context_path)
+    spec = build_phase1_spec(Path("configs/locomotion/phase1_h1.yaml"), "baseline_h1_mocap", args)
+
+    assert spec["motion_context"]["dataset_id"] == "cmu_graphics_lab_mocap"
+    assert spec["motion_context_path"] == str(context_path)
+    assert spec["style_context"]["style"] == "research_mocap_normal_walk"
 
 
 def test_batch_specs_fan_out_seeds() -> None:

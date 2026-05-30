@@ -40,29 +40,32 @@ python modal_runner/phase1.py \
   --launch-modal
 ```
 
-## Add A Walking Video Prompt
+## Add A Research Motion Reference
 
-Version 1 uses video as style context, not direct motion retargeting.
+Version 1 uses research motion capture as style context, not direct motion
+retargeting. The default source is CMU subject 07 walking motion in ASF/AMC
+format.
 
 ```bash
-python tools/prepare_video_prompt.py \
-  --url https://commons.wikimedia.org/wiki/Special:Redirect/file/Big_City_Life.webm \
-  --output-dir artifacts/video_prompts/normal_walk \
-  --license "CC0 1.0" \
-  --description "Public-domain video clip containing people walking normally in an urban setting."
+python tools/prepare_motion_reference.py \
+  --motion-id 07_01 \
+  --output-dir artifacts/motion_references/cmu_07_01
 
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk_001 \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk_001 \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --launch-modal \
   --detach
 ```
 
-The style context is copied into the Modal artifact directory as
-`style_context.json`.
+The motion context is copied into the Modal artifact directory as
+`motion_context.json`, and its nested style context is also copied as
+`style_context.json` for planner compatibility.
 
 `--detach` submits direct detached Modal function calls, so the training inputs
-are not tied to a local log tail.
+are not tied to a local log tail. The default phase-1 config runs only 10 PPO
+iterations with one held-out eval seed so train/eval/render can be debugged
+quickly before scaling.
 
 ## Autoscaled Batch
 
@@ -71,8 +74,8 @@ H100 GPUs by default.
 
 ```bash
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --num-runs 4 \
   --seed-start 42 \
   --launch-modal \
@@ -82,10 +85,10 @@ python modal_runner/phase1.py \
 This launches:
 
 ```text
-baseline_h1_normal_walk-seed-42
-baseline_h1_normal_walk-seed-43
-baseline_h1_normal_walk-seed-44
-baseline_h1_normal_walk-seed-45
+baseline_h1_cmu_walk-seed-42
+baseline_h1_cmu_walk-seed-43
+baseline_h1_cmu_walk-seed-44
+baseline_h1_cmu_walk-seed-45
 ```
 
 Each seed is submitted separately and can be scheduled on its own H100-backed
@@ -99,8 +102,8 @@ For the orchestration loop, deploy the app once and submit future jobs by name:
 modal deploy modal_runner/modal_app.py --name robogenesis-isaac-autoresearch
 
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --num-runs 4 \
   --seed-start 42 \
   --launch-modal \

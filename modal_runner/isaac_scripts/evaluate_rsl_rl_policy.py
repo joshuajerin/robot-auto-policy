@@ -62,57 +62,71 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
     aggregate = MetricAccumulator(policy_id=args_cli.policy_id, seed_count=len(seeds))
 
     for seed in seeds:
-        env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
-        env_cfg.seed = seed
-        env = gym.make(args_cli.task, cfg=env_cfg)
-        env = RslRlVecEnvWrapper(env)
+        env = None
+        try:
+            env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
+            env_cfg.seed = seed
+            env = gym.make(args_cli.task, cfg=env_cfg)
+            env = RslRlVecEnvWrapper(env)
 
-        agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
-        runner_cfg = agent_cfg.to_dict() if agent_cfg is not None else {}
-        runner_device = getattr(agent_cfg, "device", args_cli.device) if agent_cfg is not None else args_cli.device
-        runner = OnPolicyRunner(env, runner_cfg, log_dir=None, device=runner_device)
-        runner.load(args_cli.checkpoint)
-        policy = runner.get_inference_policy(device=env.unwrapped.device)
+            agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
+            runner_cfg = agent_cfg.to_dict() if agent_cfg is not None else {}
+            runner_device = getattr(agent_cfg, "device", args_cli.device) if agent_cfg is not None else args_cli.device
+            runner = OnPolicyRunner(env, runner_cfg, log_dir=None, device=runner_device)
+            runner.load(args_cli.checkpoint)
+            policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-        obs, _ = env.get_observations()
-        done_episodes = 0
-        step_count = 0
-        episode_rewards = torch.zeros(args_cli.num_envs, device=args_cli.device)
-        episode_lengths = torch.zeros(args_cli.num_envs, device=args_cli.device)
+            obs, _ = env.get_observations()
+            done_episodes = 0
+            step_count = 0
+            episode_rewards = torch.zeros(args_cli.num_envs, device=args_cli.device)
+            episode_lengths = torch.zeros(args_cli.num_envs, device=args_cli.device)
 
-        while done_episodes < args_cli.episodes_per_seed * args_cli.num_envs:
-            with torch.inference_mode():
-                actions = policy(obs)
-            obs, rewards, dones, infos = env.step(actions)
-            step_count += 1
-            episode_rewards += rewards
-            episode_lengths += 1
+            while done_episodes < args_cli.episodes_per_seed * args_cli.num_envs:
+                with torch.inference_mode():
+                    actions = policy(obs)
+                obs, rewards, dones, infos = env.step(actions)
+                step_count += 1
+                episode_rewards += rewards
+                episode_lengths += 1
 
-            aggregate.observe_step(infos=infos, rewards=rewards, actions=actions, dones=dones)
+                aggregate.observe_step(infos=infos, rewards=rewards, actions=actions, dones=dones)
 
-            if bool(dones.any()):
-                done_count = int(dones.sum().item())
-                done_episodes += done_count
-                aggregate.observe_episodes(
-                    rewards=episode_rewards[dones],
-                    lengths=episode_lengths[dones],
-                    max_steps=args_cli.max_steps_per_episode,
-                )
-                episode_rewards[dones] = 0.0
-                episode_lengths[dones] = 0.0
+                if bool(dones.any()):
+                    done_count = int(dones.sum().item())
+                    done_episodes += done_count
+                    aggregate.observe_episodes(
+                        rewards=episode_rewards[dones],
+                        lengths=episode_lengths[dones],
+                        max_steps=args_cli.max_steps_per_episode,
+                    )
+                    episode_rewards[dones] = 0.0
+                    episode_lengths[dones] = 0.0
 
-            if step_count >= args_cli.max_steps_per_episode:
-                # Treat surviving envs at max step as successful episodes for
-                # this seed, then move to the next held-out seed.
-                active = torch.ones(args_cli.num_envs, dtype=torch.bool, device=args_cli.device)
-                aggregate.observe_episodes(
-                    rewards=episode_rewards[active],
-                    lengths=episode_lengths[active],
-                    max_steps=args_cli.max_steps_per_episode,
-                )
+                if step_count >= args_cli.max_steps_per_episode:
+                    # Treat surviving envs at max step as successful episodes for
+                    # this seed, then move to the next held-out seed.
+                    active = torch.ones(args_cli.num_envs, dtype=torch.bool, device=args_cli.device)
+                    aggregate.observe_episodes(
+                        rewards=episode_rewards[active],
+                        lengths=episode_lengths[active],
+                        max_steps=args_cli.max_steps_per_episode,
+                    )
+                    break
+
+            aggregate.completed_seed_count += 1
+        except Exception as exc:
+            message = f"seed {seed}: {type(exc).__name__}: {exc}"
+            aggregate.evaluation_errors.append(message)
+            print(f"[WARN] Evaluation failed for {message}", flush=True)
+            if aggregate.episode_count == 0:
                 break
-
-        env.close()
+        finally:
+            if env is not None:
+                try:
+                    env.close()
+                except Exception as exc:
+                    print(f"[WARN] env.close failed for seed {seed}: {type(exc).__name__}: {exc}", flush=True)
 
     return aggregate.to_metrics()
 
@@ -154,6 +168,8 @@ class MetricAccumulator:
     def __init__(self, policy_id: str, seed_count: int):
         self.policy_id = policy_id
         self.seed_count = seed_count
+        self.completed_seed_count = 0
+        self.evaluation_errors: list[str] = []
         self.episode_count = 0
         self.success_count = 0
         self.reward_sum = 0.0
@@ -215,6 +231,8 @@ class MetricAccumulator:
             "policy_id": self.policy_id,
             "episode_count": self.episode_count,
             "eval_seed_count": self.seed_count,
+            "completed_eval_seed_count": self.completed_seed_count,
+            "evaluation_errors": self.evaluation_errors,
             "mean_episode_reward": mean_reward,
             "mean_episode_length": mean_length,
             "command_tracking": command_tracking,

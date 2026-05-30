@@ -33,6 +33,13 @@ def build_phase1_spec(config_path: Path, experiment: str, overrides: argparse.Na
     if style_context:
         spec["style_context"] = json.loads(Path(style_context).read_text())
         spec["style_context_path"] = style_context
+    motion_context = getattr(overrides, "motion_context", "")
+    if motion_context:
+        motion_payload = json.loads(Path(motion_context).read_text())
+        spec["motion_context"] = motion_payload
+        spec["motion_context_path"] = motion_context
+        if "style_context" not in spec and isinstance(motion_payload.get("style_context"), dict):
+            spec["style_context"] = motion_payload["style_context"]
     if getattr(overrides, "num_envs", None) is not None:
         spec["train"]["num_envs"] = overrides.num_envs
     if getattr(overrides, "max_iterations", None) is not None:
@@ -70,6 +77,7 @@ def main() -> None:
     parser.add_argument("--num-runs", type=int, default=1)
     parser.add_argument("--video-length", type=int)
     parser.add_argument("--style-context", default="")
+    parser.add_argument("--motion-context", default="")
     parser.add_argument("--launch-modal", action="store_true")
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--use-deployed", action="store_true")

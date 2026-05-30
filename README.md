@@ -116,7 +116,10 @@ GPU execution.
 - `agents/openai_planner.py` - OpenAI-backed `PatchSpec` planner.
 - `agents/reviewer.py` - candidate policy reviewer.
 - `agents/scenario_agent.py` - scenario generation wrapper.
-- `agents/video_context.py` - normal-walking video style context extraction.
+- `agents/motion_reference.py` - research mocap reference preparation for
+  locomotion style conditioning.
+- `agents/video_context.py` - legacy normal-walking video style context
+  extraction.
 - `agents/prompts/` - planner, reviewer, failure diagnosis, and scenario
   prompts.
 
@@ -128,11 +131,15 @@ GPU execution.
 - `dashboard/app.py` - Streamlit dashboard skeleton for research memory.
 - `dashboard/components/` - dashboard loaders for experiments, metrics,
   scenarios, and rollout videos.
-- `tools/prepare_video_prompt.py` - prepares a walking-video style context
-  artifact.
+- `tools/prepare_motion_reference.py` - prepares a CMU mocap walking reference
+  context artifact.
+- `tools/prepare_video_prompt.py` - legacy walking-video style context helper.
+- `tools/modal_guardian.py` - phase-1 Modal sidecar that polls app logs and
+  records failure events while code is changing.
 - `specs/` - JSON Schemas for `RobotSpec`, `TaskSpec`, `ScenarioSpec`,
   `PatchSpec`, and `EvalSpec`.
 - `docs/phase1_runbook.md` - full H1 phase-1 runbook.
+- `docs/modal_guardian.md` - always-on Modal monitoring workflow.
 - `docs/openai_setup.md` - OpenAI key/model setup.
 - `docs/implementation_log.md` - implementation history.
 - `tests/` - unit tests for patch safety, scoring, scenarios, DB, phase-1
@@ -189,28 +196,26 @@ python modal_runner/phase1.py \
   --launch-modal
 ```
 
-Launch with the normal-walking video style prompt:
+Prepare a research-grade CMU mocap walking reference:
 
 ```bash
-python tools/prepare_video_prompt.py \
-  --url https://commons.wikimedia.org/wiki/Special:Redirect/file/Big_City_Life.webm \
-  --output-dir artifacts/video_prompts/normal_walk \
-  --license "CC0 1.0" \
-  --description "Public-domain video clip containing people walking normally in an urban setting."
+python tools/prepare_motion_reference.py \
+  --motion-id 07_01 \
+  --output-dir artifacts/motion_references/cmu_07_01
 
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk_001 \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk_001 \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --launch-modal \
-  --detach
+  --use-deployed
 ```
 
 Autoscaled multi-seed launch:
 
 ```bash
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --num-runs 4 \
   --seed-start 42 \
   --launch-modal \
@@ -226,8 +231,8 @@ Persistent deployed-app orchestration:
 modal deploy modal_runner/modal_app.py --name robogenesis-isaac-autoresearch
 
 python modal_runner/phase1.py \
-  --experiment baseline_h1_normal_walk \
-  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --experiment baseline_h1_cmu_walk \
+  --motion-context artifacts/motion_references/cmu_07_01/motion_context.json \
   --num-runs 4 \
   --seed-start 42 \
   --launch-modal \
@@ -241,6 +246,7 @@ renders an actual H1 rollout video, and writes:
 ```text
 experiment_spec.json
 h1_asset_report.json
+motion_context.json
 raw_eval_metrics.json
 eval_metrics.json
 artifact_manifest.json
@@ -260,11 +266,11 @@ python modal_runner/train.py \
   --experiment baseline_001 \
   --task Isaac-Velocity-Flat-H1-v0 \
   --num-envs 4096 \
-  --max-iterations 1000
+  --max-iterations 10
 
 modal run modal_runner/modal_app.py \
   --action train-and-eval \
-  --experiment-spec-json '{"experiment_id":"baseline_001","task":"Isaac-Velocity-Flat-H1-v0","num_envs":4096,"max_iterations":1000}'
+  --experiment-spec-json '{"experiment_id":"baseline_001","task":"Isaac-Velocity-Flat-H1-v0","num_envs":4096,"max_iterations":10}'
 ```
 
 Score a raw metrics file with the locked evaluator:

@@ -7,18 +7,18 @@ runner: rsl_rl
 device: cuda:0
 train:
   num_envs: 8192
-  max_iterations: 1000
+  max_iterations: 10
   seed: 42
   video: false
   command_timeout_seconds: 0
 eval:
   num_envs: 32
-  episodes_per_seed: 4
+  episodes_per_seed: 1
   max_steps_per_episode: 1000
-  seeds: [101, 203, 307, 409, 503, 601, 709, 811]
+  seeds: [101]
 render:
   num_envs: 1
-  video_length: 240
+  video_length: 120
   seed: 907
   checkpoint: latest
 artifacts:
@@ -27,4 +27,4 @@ artifacts:
 autoscale:
   gpu: H100
   max_phase1_containers: 4
-  notes: "Batch launch fans out independent seeds across Modal containers. Increase max_phase1_containers only with explicit spend intent."
+  notes: "Default phase-1 is a 10-iteration system test. Scale max_iterations/eval seeds only after train/eval/render passes end to end."
