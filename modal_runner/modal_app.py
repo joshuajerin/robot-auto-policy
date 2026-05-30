@@ -16,7 +16,7 @@ import modal
 APP_NAME = "robogenesis-isaac-autoresearch"
 ISAAC_LAB_IMAGE = "nvcr.io/nvidia/isaac-lab:2.0.2"
 DEFAULT_GPU = "H100"
-RENDER_GPU = "RTX PRO 6000"
+RENDER_GPU = "RTX-PRO-6000"
 CPU_COUNT = 32.0
 MEMORY_MB = 262_144
 RENDER_CPU_COUNT = 16.0
