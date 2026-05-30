@@ -1,10 +1,15 @@
-"""Render a real Unitree H1 walking video with Blender on Modal.
+"""Render a Unitree H1 physics-scene video with Blender on Modal.
 
 This is intentionally separate from Isaac Lab rendering. Isaac Sim camera
 rendering needs a Vulkan/RTX graphics stack that Modal containers may not expose
 reliably. Blender's Python package can render the public Unitree H1 USD bundle
 with CUDA/Cycles on Modal GPU workers, so it gives us an actual model video for
 review while Isaac Lab remains the source of policy training.
+
+The renderer imports the top-level ``h1.usd`` asset, whose default variant loads
+the PhysX articulation payload. Blender does not execute NVIDIA PhysX
+articulation drives, so this path preserves the official connected asset and
+scene context for visualization instead of pretending to simulate joint torques.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ APP_NAME = "robogenesis-blender-h1-render"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REMOTE_H1_ASSET_ROOT = Path("/robogenesis/assets/unitree_h1")
 DEFAULT_TRACE = "artifacts/downloaded_modal/baseline_h1_cmu_walk_telemetry-seed-200/rollout_trace.json"
-DEFAULT_OUTPUT = "artifacts/blender_renders/h1_blender_walk.mp4"
+DEFAULT_OUTPUT = "artifacts/blender_renders/h1_physics_scene_walk.mp4"
 
 
 app = modal.App(APP_NAME)
@@ -74,10 +79,11 @@ def render_h1_walk_video(
     _clear_scene(bpy)
     _configure_rendering(bpy, width=width, height=height, samples=samples)
 
-    usd_path = REMOTE_H1_ASSET_ROOT / "usd" / "configuration" / "h1_base.usd"
+    usd_path = REMOTE_H1_ASSET_ROOT / "usd" / "h1.usd"
     if not usd_path.exists():
         raise FileNotFoundError(f"Missing H1 USD asset at {usd_path}")
 
+    print(f"Importing Unitree H1 physics USD asset: {usd_path}", flush=True)
     before = set(bpy.data.objects)
     bpy.ops.wm.usd_import(filepath=str(usd_path))
     imported = [obj for obj in bpy.data.objects if obj not in before]
@@ -90,10 +96,12 @@ def render_h1_walk_video(
         if obj.parent is None:
             obj.parent = root
 
-    _wire_h1_hierarchy(imported)
+    _tag_asset_metadata(root, usd_path)
+    _hide_physics_debug_geometry(imported)
     _center_model_on_ground(imported, root)
-    _create_world(bpy)
-    _animate_walk(bpy, root, imported, trace=trace, frame_count=frame_count, fps=fps)
+    floor = _create_world(bpy)
+    _setup_scene_physics(bpy, floor)
+    _animate_connected_root_motion(bpy, root, trace=trace, frame_count=frame_count, fps=fps)
     _ground_root_animation(bpy, root, imported, frame_count=frame_count)
     _create_camera_and_lights(bpy)
 
@@ -211,62 +219,96 @@ def _world_bounds(objects: list[Any]) -> dict[str, float]:
     return values
 
 
-def _wire_h1_hierarchy(imported: list[Any]) -> None:
-    links = _indexed_link_xforms(imported)
-    parent_pairs = (
-        ("left_hip_roll_link", "left_hip_yaw_link"),
-        ("left_hip_pitch_link", "left_hip_roll_link"),
-        ("left_knee_link", "left_hip_pitch_link"),
-        ("left_ankle_link", "left_knee_link"),
-        ("right_hip_roll_link", "right_hip_yaw_link"),
-        ("right_hip_pitch_link", "right_hip_roll_link"),
-        ("right_knee_link", "right_hip_pitch_link"),
-        ("right_ankle_link", "right_knee_link"),
-        ("torso_link", "pelvis"),
-        ("left_shoulder_pitch_link", "torso_link"),
-        ("left_shoulder_roll_link", "left_shoulder_pitch_link"),
-        ("left_shoulder_yaw_link", "left_shoulder_roll_link"),
-        ("left_elbow_link", "left_shoulder_yaw_link"),
-        ("right_shoulder_pitch_link", "torso_link"),
-        ("right_shoulder_roll_link", "right_shoulder_pitch_link"),
-        ("right_shoulder_yaw_link", "right_shoulder_roll_link"),
-        ("right_elbow_link", "right_shoulder_yaw_link"),
-    )
-    for child_name, parent_name in parent_pairs:
-        child = links.get(child_name)
-        parent = links.get(parent_name)
-        if child is None or parent is None or child.parent is parent:
-            continue
-        child_world = child.matrix_world.copy()
-        child.parent = parent
-        child.matrix_world = child_world
+def _tag_asset_metadata(root: Any, usd_path: Path) -> None:
+    root["robogenesis_asset"] = "unitree_h1"
+    root["robogenesis_usd_source"] = str(usd_path)
+    root["robogenesis_usd_physics_variant"] = "PhysX"
+    root["robogenesis_renderer_note"] = "Blender renders the USD PhysX asset; Isaac/Omniverse runs articulated physics."
 
 
-def _create_world(bpy: Any) -> None:
+def _hide_physics_debug_geometry(imported: list[Any]) -> None:
+    for obj in imported:
+        lineage = " ".join(_object_lineage(obj)).lower()
+        if any(token in lineage for token in ("collisions", "collision", "collider")):
+            obj.hide_render = True
+            obj.hide_viewport = True
+
+
+def _object_lineage(obj: Any) -> list[str]:
+    names: list[str] = []
+    current = obj
+    while current is not None:
+        names.append(str(getattr(current, "name", "")))
+        current = getattr(current, "parent", None)
+    return names
+
+
+def _create_world(bpy: Any) -> Any:
     bpy.context.scene.world = bpy.data.worlds.new("RoboGenesis_World")
-    bpy.context.scene.world.color = (0.03, 0.035, 0.04)
+    bpy.context.scene.world.color = (0.025, 0.027, 0.03)
 
-    floor_mat = bpy.data.materials.new("matte charcoal floor")
-    floor_mat.diffuse_color = (0.05, 0.055, 0.06, 1.0)
-    bpy.ops.mesh.primitive_plane_add(size=10, location=(1.2, 0.0, 0.0))
+    floor_mat = bpy.data.materials.new("rubberized lab floor")
+    floor_mat.diffuse_color = (0.075, 0.078, 0.076, 1.0)
+    floor_mat.use_nodes = True
+    bsdf = floor_mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.075, 0.078, 0.076, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.86
+
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(1.0, 0.0, -0.015))
     floor = bpy.context.object
-    floor.name = "ground_plane"
+    floor.name = "physics_ground_rubber_floor"
+    floor.scale = (7.0, 3.0, 0.015)
     floor.data.materials.append(floor_mat)
 
-    stripe_mat = bpy.data.materials.new("subtle walking path")
-    stripe_mat.diffuse_color = (0.12, 0.16, 0.18, 1.0)
-    for x in [-1.0, 0.5, 2.0, 3.5]:
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, 0.0, 0.006))
+    lane_mat = bpy.data.materials.new("low profile lane markings")
+    lane_mat.diffuse_color = (0.47, 0.55, 0.55, 1.0)
+    for y in (-0.42, 0.42):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(1.0, y, 0.006))
+        lane = bpy.context.object
+        lane.name = "ground_lane_boundary"
+        lane.scale = (5.0, 0.01, 0.003)
+        lane.data.materials.append(lane_mat)
+
+    for x in [-2.2, -1.0, 0.2, 1.4, 2.6, 3.8]:
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, 0.0, 0.008))
         stripe = bpy.context.object
-        stripe.name = "floor_stride_marker"
-        stripe.scale = (0.025, 1.3, 0.004)
-        stripe.data.materials.append(stripe_mat)
+        stripe.name = "ground_distance_marker"
+        stripe.scale = (0.012, 0.42, 0.003)
+        stripe.data.materials.append(lane_mat)
+
+    wall_mat = bpy.data.materials.new("matte rear wall")
+    wall_mat.diffuse_color = (0.11, 0.12, 0.12, 1.0)
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(1.0, 1.53, 1.2))
+    wall = bpy.context.object
+    wall.name = "lab_back_wall"
+    wall.scale = (7.0, 0.025, 1.2)
+    wall.data.materials.append(wall_mat)
+    return floor
 
 
-def _animate_walk(
+def _setup_scene_physics(bpy: Any, floor: Any) -> None:
+    scene = bpy.context.scene
+    scene.gravity = (0.0, 0.0, -9.81)
+    if scene.rigidbody_world is None:
+        bpy.ops.rigidbody.world_add()
+    scene.rigidbody_world.time_scale = 1.0
+    scene.rigidbody_world.substeps_per_frame = 10
+    scene.rigidbody_world.solver_iterations = 25
+
+    bpy.ops.object.select_all(action="DESELECT")
+    floor.select_set(True)
+    bpy.context.view_layer.objects.active = floor
+    bpy.ops.rigidbody.object_add(type="PASSIVE")
+    floor.rigid_body.friction = 0.95
+    floor.rigid_body.restitution = 0.02
+    floor.rigid_body.collision_shape = "BOX"
+    floor.select_set(False)
+
+
+def _animate_connected_root_motion(
     bpy: Any,
     root: Any,
-    imported: list[Any],
     *,
     trace: dict[str, Any],
     frame_count: int,
@@ -274,38 +316,24 @@ def _animate_walk(
 ) -> None:
     from mathutils import Euler
 
-    objects = _indexed_link_xforms(imported)
-    base_rotations = {obj.name: obj.rotation_euler.copy() for obj in imported}
     trace_frames = trace.get("frames") if isinstance(trace.get("frames"), list) else []
     base_root_z = float(root.location.z)
 
     root.rotation_euler = Euler((0.0, 0.0, 0.0), "XYZ")
-    cycles = max(1.25, frame_count / max(1, fps) * 1.75)
+    cycles = max(1.0, frame_count / max(1, fps) * 1.25)
+    velocity_command = _velocity_command(trace_frames)
+    x_travel = max(0.9, min(2.0, velocity_command * frame_count / max(1, fps) * 0.55))
     for frame in range(1, frame_count + 1):
         t = (frame - 1) / max(1, frame_count - 1)
         phase = 2.0 * math.pi * cycles * t
         trace_frame = trace_frames[min(len(trace_frames) - 1, int(t * max(0, len(trace_frames) - 1)))] if trace_frames else {}
-        trace_joint_pos = trace_frame.get("joint_pos") if isinstance(trace_frame, dict) else []
-        if not isinstance(trace_joint_pos, list):
-            trace_joint_pos = []
+        base_ang_vel = trace_frame.get("base_ang_vel") if isinstance(trace_frame, dict) else []
+        yaw_rate = _trace(base_ang_vel, 2, 0.05) if isinstance(base_ang_vel, list) else 0.0
 
-        root.location = (1.2 * t - 0.6, 0.0, base_root_z + 0.02 + 0.035 * abs(math.sin(phase)))
-        root.rotation_euler = Euler((0.035 * math.sin(phase + 0.4), 0.02 * math.sin(phase * 0.5), 0.012 * math.sin(phase)), "XYZ")
+        root.location = (x_travel * t - x_travel * 0.5, 0.0, base_root_z + 0.018 + 0.012 * abs(math.sin(phase)))
+        root.rotation_euler = Euler((0.018 * math.sin(phase + 0.35), 0.01 * math.sin(phase * 0.5), yaw_rate), "XYZ")
         root.keyframe_insert(data_path="location", frame=frame)
         root.keyframe_insert(data_path="rotation_euler", frame=frame)
-
-        left = math.sin(phase)
-        right = math.sin(phase + math.pi)
-        _pose_link(objects, base_rotations, "left_hip_pitch", axis=1, angle=0.24 * left + _trace(trace_joint_pos, 2, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "right_hip_pitch", axis=1, angle=0.24 * right + _trace(trace_joint_pos, 7, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "left_knee", axis=1, angle=0.42 * max(0.0, -left) + _trace(trace_joint_pos, 3, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "right_knee", axis=1, angle=0.42 * max(0.0, -right) + _trace(trace_joint_pos, 8, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "left_ankle", axis=1, angle=-0.16 * left + _trace(trace_joint_pos, 4, 0.04), frame=frame)
-        _pose_link(objects, base_rotations, "right_ankle", axis=1, angle=-0.16 * right + _trace(trace_joint_pos, 9, 0.04), frame=frame)
-        _pose_link(objects, base_rotations, "left_shoulder_pitch", axis=1, angle=-0.30 * left + _trace(trace_joint_pos, 11, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "right_shoulder_pitch", axis=1, angle=-0.30 * right + _trace(trace_joint_pos, 15, 0.06), frame=frame)
-        _pose_link(objects, base_rotations, "left_elbow", axis=1, angle=0.18 + 0.14 * max(0.0, left), frame=frame)
-        _pose_link(objects, base_rotations, "right_elbow", axis=1, angle=0.18 + 0.14 * max(0.0, right), frame=frame)
 
 
 def _ground_root_animation(bpy: Any, root: Any, imported: list[Any], *, frame_count: int) -> None:
@@ -319,48 +347,22 @@ def _ground_root_animation(bpy: Any, root: Any, imported: list[Any], *, frame_co
         root.keyframe_insert(data_path="location", frame=frame)
 
 
-def _indexed_link_xforms(imported: list[Any]) -> dict[str, Any]:
-    index: dict[str, Any] = {}
-    wanted = (
-        "pelvis",
-        "torso_link",
-        "left_hip_yaw_link",
-        "left_hip_roll_link",
-        "left_hip_pitch_link",
-        "left_knee_link",
-        "left_ankle_link",
-        "right_hip_yaw_link",
-        "right_hip_roll_link",
-        "right_hip_pitch_link",
-        "right_knee_link",
-        "right_ankle_link",
-        "left_shoulder_pitch_link",
-        "left_shoulder_roll_link",
-        "left_shoulder_yaw_link",
-        "left_elbow_link",
-        "right_shoulder_pitch_link",
-        "right_shoulder_roll_link",
-        "right_shoulder_yaw_link",
-        "right_elbow_link",
-    )
-    for obj in imported:
-        if obj.type == "MESH":
+def _velocity_command(trace_frames: list[Any]) -> float:
+    if not trace_frames:
+        return 0.75
+    commands: list[float] = []
+    for frame in trace_frames[: min(20, len(trace_frames))]:
+        if not isinstance(frame, dict):
             continue
-        normalized = obj.name.split(".", 1)[0]
-        if normalized in wanted and normalized not in index:
-            index[normalized] = obj
-    print(f"Indexed {len(index)} H1 link xforms", flush=True)
-    return index
-
-
-def _pose_link(objects: dict[str, Any], base_rotations: dict[str, Any], key: str, *, axis: int, angle: float, frame: int) -> None:
-    obj = objects.get(f"{key}_link")
-    if obj is None:
-        return
-    rotation = base_rotations[obj.name].copy()
-    rotation[axis] += angle
-    obj.rotation_euler = rotation
-    obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+        command = frame.get("velocity_command")
+        if isinstance(command, list) and command:
+            try:
+                commands.append(abs(float(command[0])))
+            except Exception:
+                continue
+    if not commands:
+        return 0.75
+    return sum(commands) / len(commands)
 
 
 def _trace(values: list[Any], index: int, scale: float) -> float:
