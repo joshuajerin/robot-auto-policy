@@ -91,6 +91,25 @@ baseline_h1_normal_walk-seed-45
 Each seed is submitted separately and can be scheduled on its own H100-backed
 container.
 
+## Deployed App Submission
+
+For the orchestration loop, deploy the app once and submit future jobs by name:
+
+```bash
+modal deploy modal_runner/modal_app.py --name robogenesis-isaac-autoresearch
+
+python modal_runner/phase1.py \
+  --experiment baseline_h1_normal_walk \
+  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --num-runs 4 \
+  --seed-start 42 \
+  --launch-modal \
+  --use-deployed
+```
+
+This uses `modal.Function.from_name(...).spawn(...)` and avoids creating
+one-off ephemeral apps for normal orchestration.
+
 Equivalent explicit Modal command:
 
 ```bash

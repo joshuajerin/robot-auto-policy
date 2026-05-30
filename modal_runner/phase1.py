@@ -5,10 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from modal_runner.deployed import DEFAULT_APP_NAME, submit_phase1_specs_to_deployed
 
 
 def build_phase1_spec(config_path: Path, experiment: str, overrides: argparse.Namespace) -> dict[str, Any]:
@@ -66,12 +72,23 @@ def main() -> None:
     parser.add_argument("--style-context", default="")
     parser.add_argument("--launch-modal", action="store_true")
     parser.add_argument("--detach", action="store_true")
+    parser.add_argument("--use-deployed", action="store_true")
+    parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
+    parser.add_argument("--write-spec", default="")
     args = parser.parse_args()
 
     specs = build_batch_specs(Path(args.config), args.experiment, args)
     spec_json = json.dumps(specs if args.num_runs > 1 else specs[0], sort_keys=True)
 
+    if args.write_spec:
+        Path(args.write_spec).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.write_spec).write_text(json.dumps(specs if args.num_runs > 1 else specs[0], indent=2, sort_keys=True) + "\n")
+
     if args.launch_modal:
+        if args.use_deployed:
+            call_ids = submit_phase1_specs_to_deployed(specs, app_name=args.app_name)
+            print(json.dumps({"app_name": args.app_name, "function_call_ids": call_ids}, indent=2, sort_keys=True))
+            return
         if args.detach:
             for spec in specs:
                 subprocess.run(
