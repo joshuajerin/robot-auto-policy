@@ -185,6 +185,44 @@ class ExperimentDB:
         )
         self.conn.commit()
 
+    def update_experiment_status(
+        self,
+        experiment_id: str,
+        *,
+        status: str,
+        score_before: float | None = None,
+        score_after: float | None = None,
+        accepted: bool | None = None,
+        modal_job_id: str | None = None,
+    ) -> None:
+        assignments = ["status = ?"]
+        values: list[Any] = [status]
+        if score_before is not None:
+            assignments.append("score_before = ?")
+            values.append(score_before)
+        if score_after is not None:
+            assignments.append("score_after = ?")
+            values.append(score_after)
+        if accepted is not None:
+            assignments.append("accepted = ?")
+            values.append(int(accepted))
+        if modal_job_id is not None:
+            assignments.append("modal_job_id = ?")
+            values.append(modal_job_id)
+        values.append(experiment_id)
+        self.conn.execute(
+            f"UPDATE experiments SET {', '.join(assignments)} WHERE id = ?",
+            values,
+        )
+        self.conn.commit()
+
+    def experiments_by_status(self, status: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM experiments WHERE status = ? ORDER BY created_at, id",
+            (status,),
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
     def recent_experiments(self, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM experiments ORDER BY rowid DESC LIMIT ?",
