@@ -35,8 +35,10 @@ ERROR_PATTERNS = (
     "Could not locate isaaclab.sh",
     "HTTP Error",
     "InputCancellation",
-    "cancelled",
-    "failed",
+    "CancelledError",
+    "Function failed",
+    "Task failed",
+    "Container failed",
 )
 
 

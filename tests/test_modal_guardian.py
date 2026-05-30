@@ -14,6 +14,16 @@ def test_scan_for_modal_errors_matches_failure_lines() -> None:
     assert any("Traceback" in hit for hit in hits)
 
 
+def test_scan_for_modal_errors_ignores_headless_isaac_warnings() -> None:
+    text = """
+    [Warning] [omni.platforminfo.plugin] failed to open the default display.
+    Warp CUDA error: Failed to get driver entry point 'cuDeviceGetUuid'
+    [INFO] training continues
+    """
+
+    assert scan_for_modal_errors(text) == []
+
+
 def test_load_phase1_specs_accepts_single_spec(tmp_path) -> None:
     path = tmp_path / "spec.json"
     path.write_text('{"experiment_id":"quick"}')
