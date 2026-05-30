@@ -243,6 +243,10 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
     artifact_root = _artifact_root(experiment_id)
 
     (artifact_root / "experiment_spec.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
+    if spec.get("style_context"):
+        (artifact_root / "style_context.json").write_text(
+            json.dumps(spec["style_context"], indent=2, sort_keys=True) + "\n"
+        )
 
     h1_report_path = artifact_root / "h1_asset_report.json"
     _run(

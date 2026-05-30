@@ -40,6 +40,27 @@ python modal_runner/phase1.py \
   --launch-modal
 ```
 
+## Add A Walking Video Prompt
+
+Version 1 uses video as style context, not direct motion retargeting.
+
+```bash
+python tools/prepare_video_prompt.py \
+  --url https://commons.wikimedia.org/wiki/Special:Redirect/file/Big_City_Life.webm \
+  --output-dir artifacts/video_prompts/normal_walk \
+  --license "CC0 1.0" \
+  --description "Public-domain video clip containing people walking normally in an urban setting."
+
+python modal_runner/phase1.py \
+  --experiment baseline_h1_normal_walk_001 \
+  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --launch-modal \
+  --detach
+```
+
+The style context is copied into the Modal artifact directory as
+`style_context.json`.
+
 Equivalent explicit Modal command:
 
 ```bash

@@ -92,6 +92,22 @@ python modal_runner/phase1.py \
   --launch-modal
 ```
 
+Launch with the normal-walking video style prompt:
+
+```bash
+python tools/prepare_video_prompt.py \
+  --url https://commons.wikimedia.org/wiki/Special:Redirect/file/Big_City_Life.webm \
+  --output-dir artifacts/video_prompts/normal_walk \
+  --license "CC0 1.0" \
+  --description "Public-domain video clip containing people walking normally in an urban setting."
+
+python modal_runner/phase1.py \
+  --experiment baseline_h1_normal_walk_001 \
+  --style-context artifacts/video_prompts/normal_walk/style_context.json \
+  --launch-modal \
+  --detach
+```
+
 That Modal job uses `Isaac-Velocity-Flat-H1-v0`, trains with `rsl_rl`, resolves
 the H1 asset inside the Isaac Lab container, evaluates fixed held-out seeds,
 renders an actual H1 rollout video, and writes:

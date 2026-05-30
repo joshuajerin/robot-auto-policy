@@ -23,6 +23,10 @@ def build_phase1_spec(config_path: Path, experiment: str, overrides: argparse.Na
         "eval": dict(config.get("eval", {})),
         "render": dict(config.get("render", {})),
     }
+    style_context = getattr(overrides, "style_context", "")
+    if style_context:
+        spec["style_context"] = json.loads(Path(style_context).read_text())
+        spec["style_context_path"] = style_context
     if overrides.num_envs is not None:
         spec["train"]["num_envs"] = overrides.num_envs
     if overrides.max_iterations is not None:
@@ -45,23 +49,32 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--video-length", type=int)
+    parser.add_argument("--style-context", default="")
     parser.add_argument("--launch-modal", action="store_true")
+    parser.add_argument("--detach", action="store_true")
     args = parser.parse_args()
 
     spec = build_phase1_spec(Path(args.config), args.experiment, args)
     spec_json = json.dumps(spec, sort_keys=True)
 
     if args.launch_modal:
-        subprocess.run(
+        command = [
+            "modal",
+            "run",
+        ]
+        if args.detach:
+            command.append("--detach")
+        command.extend(
             [
-                "modal",
-                "run",
                 "modal_runner/modal_app.py",
                 "--action",
                 "phase1",
                 "--experiment-spec-json",
                 spec_json,
-            ],
+            ]
+        )
+        subprocess.run(
+            command,
             check=True,
         )
         return
@@ -71,4 +84,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
