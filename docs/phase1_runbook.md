@@ -61,8 +61,8 @@ python modal_runner/phase1.py \
 The style context is copied into the Modal artifact directory as
 `style_context.json`.
 
-`--detach` uses a Modal `spawn()` call and returns a function call id, so the
-training input is not tied to the local log tail.
+`--detach` submits direct detached Modal function calls, so the training inputs
+are not tied to a local log tail.
 
 ## Autoscaled Batch
 
@@ -87,6 +87,9 @@ baseline_h1_normal_walk-seed-43
 baseline_h1_normal_walk-seed-44
 baseline_h1_normal_walk-seed-45
 ```
+
+Each seed is submitted separately and can be scheduled on its own H100-backed
+container.
 
 Equivalent explicit Modal command:
 

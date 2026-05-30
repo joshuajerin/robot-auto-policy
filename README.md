@@ -120,6 +120,9 @@ python modal_runner/phase1.py \
   --detach
 ```
 
+Each seed is submitted as a direct detached Modal function call, allowing Modal
+to schedule multiple H100-backed jobs concurrently.
+
 That Modal job uses `Isaac-Velocity-Flat-H1-v0`, trains with `rsl_rl`, resolves
 the H1 asset inside the Isaac Lab container, evaluates fixed held-out seeds,
 renders an actual H1 rollout video, and writes:

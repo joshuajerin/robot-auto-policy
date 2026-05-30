@@ -72,23 +72,32 @@ def main() -> None:
     spec_json = json.dumps(specs if args.num_runs > 1 else specs[0], sort_keys=True)
 
     if args.launch_modal:
-        command = [
-            "modal",
-            "run",
-        ]
-        command.extend(
-            [
-                "modal_runner/modal_app.py",
-                "--action",
-                "phase1-batch-detach" if args.detach and args.num_runs > 1 else ("phase1-detach" if args.detach else "phase1"),
-                "--experiment-spec-json",
-                spec_json,
-            ]
-        )
-        subprocess.run(
-            command,
-            check=True,
-        )
+        if args.detach:
+            for spec in specs:
+                subprocess.run(
+                    [
+                        "modal",
+                        "run",
+                        "--detach",
+                        "modal_runner/modal_app.py::phase1_baseline_job",
+                        "--experiment-spec-json",
+                        json.dumps(spec, sort_keys=True),
+                    ],
+                    check=True,
+                )
+        else:
+            subprocess.run(
+                [
+                    "modal",
+                    "run",
+                    "modal_runner/modal_app.py",
+                    "--action",
+                    "phase1-batch-detach" if args.num_runs > 1 else "phase1",
+                    "--experiment-spec-json",
+                    spec_json,
+                ],
+                check=True,
+            )
         return
 
     print(json.dumps(specs if args.num_runs > 1 else specs[0], indent=2, sort_keys=True))
