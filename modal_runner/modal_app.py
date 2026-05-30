@@ -396,4 +396,8 @@ def main(action: str = "smoke", experiment_spec_json: str = "{}") -> None:
     if action == "phase1":
         print(json.dumps(phase1_baseline_job.remote(experiment_spec_json), indent=2, sort_keys=True))
         return
-    raise ValueError("action must be 'smoke', 'train-and-eval', or 'phase1'")
+    if action == "phase1-detach":
+        call = phase1_baseline_job.spawn(experiment_spec_json)
+        print(json.dumps({"function_call_id": call.object_id, "status": "spawned"}, indent=2, sort_keys=True))
+        return
+    raise ValueError("action must be 'smoke', 'train-and-eval', 'phase1', or 'phase1-detach'")

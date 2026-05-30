@@ -61,6 +61,9 @@ python modal_runner/phase1.py \
 The style context is copied into the Modal artifact directory as
 `style_context.json`.
 
+`--detach` uses a Modal `spawn()` call and returns a function call id, so the
+training input is not tied to the local log tail.
+
 Equivalent explicit Modal command:
 
 ```bash

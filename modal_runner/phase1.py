@@ -62,13 +62,11 @@ def main() -> None:
             "modal",
             "run",
         ]
-        if args.detach:
-            command.append("--detach")
         command.extend(
             [
                 "modal_runner/modal_app.py",
                 "--action",
-                "phase1",
+                "phase1-detach" if args.detach else "phase1",
                 "--experiment-spec-json",
                 spec_json,
             ]
