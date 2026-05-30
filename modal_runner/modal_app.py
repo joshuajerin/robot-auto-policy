@@ -16,10 +16,13 @@ import modal
 APP_NAME = "robogenesis-isaac-autoresearch"
 ISAAC_LAB_IMAGE = "nvcr.io/nvidia/isaac-lab:2.0.2"
 DEFAULT_GPU = "H100"
-RENDER_GPU_FALLBACKS = ["L40S", "A100-80GB", "A100-40GB", "A100", "H100", "H200", "A10G", "L4"]
+RENDER_GPU = "RTX PRO 6000"
 CPU_COUNT = 32.0
 MEMORY_MB = 262_144
+RENDER_CPU_COUNT = 16.0
+RENDER_MEMORY_MB = 131_072
 MAX_PHASE1_CONTAINERS = 4
+MAX_RENDER_CONTAINERS = 2
 SCALEDOWN_WINDOW_SECONDS = 300
 TIMEOUT_SECONDS = 6 * 60 * 60
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +104,13 @@ def _sync_artifacts(experiment_id: str) -> str:
     return str(output_root)
 
 
+def _reload_runs_volume() -> None:
+    try:
+        runs_volume.reload()
+    except AttributeError:
+        pass
+
+
 def _artifact_root(experiment_id: str) -> Path:
     root = Path("/runs") / "experiments" / _safe_name(experiment_id)
     root.mkdir(parents=True, exist_ok=True)
@@ -128,6 +138,22 @@ def _find_checkpoint(experiment_id: str, checkpoint: str = "latest") -> Path:
         raise FileNotFoundError(f"Checkpoint {checkpoint} not found under {logs_root}")
 
     return sorted(candidates, key=_checkpoint_sort_key)[-1]
+
+
+def _restore_logs_from_artifact(experiment_id: str) -> None:
+    artifact_logs = _artifact_root(experiment_id) / "logs"
+    if not artifact_logs.exists():
+        raise FileNotFoundError(f"No synced logs found for {experiment_id} under {artifact_logs}")
+    isaac_logs = _isaac_lab_root() / "logs"
+    shutil.copytree(artifact_logs, isaac_logs, dirs_exist_ok=True)
+
+
+def _find_isaac_camera_videos(artifact_root: Path) -> list[str]:
+    return [
+        str(path)
+        for path in sorted(artifact_root.rglob("*.mp4"))
+        if path.name != "rollout_telemetry.mp4"
+    ]
 
 
 def _checkpoint_sort_key(path: Path) -> tuple[int, str]:
@@ -499,6 +525,106 @@ def _build_telemetry_render_cmd(
     ]
 
 
+def _build_isaac_camera_render_cmd(
+    *,
+    runner: str,
+    task: str,
+    checkpoint_path: Path,
+    render_spec: dict[str, Any],
+) -> list[str]:
+    # Isaac Lab 2.0.x rsl_rl/play.py does not accept a seed argument.
+    return [
+        "./isaaclab.sh",
+        "-p",
+        f"scripts/reinforcement_learning/{runner}/play.py",
+        "--task",
+        task,
+        "--headless",
+        "--num_envs",
+        str(int(render_spec.get("num_envs", 1))),
+        "--load_run",
+        checkpoint_path.parent.name,
+        "--checkpoint",
+        checkpoint_path.name,
+        "--video",
+        "--video_length",
+        str(int(render_spec.get("video_length", 240))),
+        "--enable_cameras",
+    ]
+
+
+@app.function(
+    image=image,
+    gpu=RENDER_GPU,
+    cpu=RENDER_CPU_COUNT,
+    memory=RENDER_MEMORY_MB,
+    timeout=2 * 60 * 60,
+    volumes=volumes,
+    min_containers=0,
+    max_containers=MAX_RENDER_CONTAINERS,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+)
+def render_isaac_h1_video_job(render_spec_json: str) -> dict[str, Any]:
+    """Render an actual Isaac camera video for an existing H1 experiment."""
+
+    _reload_runs_volume()
+    spec = json.loads(render_spec_json)
+    experiment_id = _safe_name(str(spec["experiment_id"]))
+    task = str(spec.get("task", "Isaac-Velocity-Flat-H1-v0"))
+    runner = str(spec.get("runner", "rsl_rl"))
+    checkpoint = str(spec.get("checkpoint", "latest"))
+    artifact_root = _artifact_root(experiment_id)
+
+    _run(["nvidia-smi"], cwd=Path("/"))
+    _restore_logs_from_artifact(experiment_id)
+    checkpoint_path = _find_checkpoint(experiment_id, checkpoint)
+    render_cmd = _build_isaac_camera_render_cmd(
+        runner=runner,
+        task=task,
+        checkpoint_path=checkpoint_path,
+        render_spec=spec,
+    )
+    timeout_seconds = int(spec.get("command_timeout_seconds", 1800))
+    render_error_path = artifact_root / "isaac_camera_render_error.json"
+    try:
+        _run(_with_timeout(render_cmd, timeout_seconds), ok_codes=(0, 124) if timeout_seconds > 0 else (0,))
+    except subprocess.CalledProcessError as exc:
+        render_error_path.write_text(
+            json.dumps(
+                {
+                    "command": exc.cmd,
+                    "returncode": exc.returncode,
+                    "gpu": RENDER_GPU,
+                    "note": "Actual Isaac camera render failed on RTX render worker.",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        runs_volume.commit()
+        raise
+
+    synced_root = Path(_sync_artifacts(experiment_id))
+    actual_videos = _find_isaac_camera_videos(synced_root)
+    all_videos = _find_videos(synced_root)
+    report = {
+        "experiment_id": experiment_id,
+        "task": task,
+        "runner": runner,
+        "gpu": RENDER_GPU,
+        "checkpoint_path": str(checkpoint_path),
+        "actual_video_count": len(actual_videos),
+        "actual_video_paths": actual_videos,
+        "primary_actual_video_path": actual_videos[-1] if actual_videos else None,
+        "all_video_paths": all_videos,
+        "render_command": render_cmd,
+    }
+    (synced_root / "isaac_camera_videos.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    runs_volume.commit()
+    return report
+
+
 def _fallback_eval_metrics(experiment_id: str, reason: str) -> dict[str, Any]:
     return {
         "policy_id": experiment_id,
@@ -559,6 +685,24 @@ def main(action: str = "smoke", experiment_spec_json: str = "{}") -> None:
             )
         )
         return
+    if action == "render-isaac":
+        print(json.dumps(render_isaac_h1_video_job.remote(experiment_spec_json), indent=2, sort_keys=True))
+        return
+    if action == "render-isaac-detach":
+        call = render_isaac_h1_video_job.spawn(experiment_spec_json)
+        print(
+            json.dumps(
+                {
+                    "function_call_id": call.object_id,
+                    "gpu": RENDER_GPU,
+                    "status": "spawned",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
     raise ValueError(
-        "action must be 'smoke', 'train-and-eval', 'phase1', 'phase1-detach', or 'phase1-batch-detach'"
+        "action must be 'smoke', 'train-and-eval', 'phase1', 'phase1-detach', "
+        "'phase1-batch-detach', 'render-isaac', or 'render-isaac-detach'"
     )

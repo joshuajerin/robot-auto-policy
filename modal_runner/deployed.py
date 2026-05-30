@@ -17,6 +17,7 @@ import modal
 
 DEFAULT_APP_NAME = "robogenesis-isaac-autoresearch"
 PHASE1_FUNCTION = "phase1_baseline_job"
+RENDER_FUNCTION = "render_isaac_h1_video_job"
 
 
 def submit_phase1_specs_to_deployed(
@@ -26,6 +27,20 @@ def submit_phase1_specs_to_deployed(
     environment_name: str | None = None,
 ) -> list[str]:
     function = modal.Function.from_name(app_name, PHASE1_FUNCTION, environment_name=environment_name)
+    call_ids: list[str] = []
+    for spec in specs:
+        call = function.spawn(json.dumps(spec, sort_keys=True))
+        call_ids.append(call.object_id)
+    return call_ids
+
+
+def submit_render_specs_to_deployed(
+    specs: list[dict[str, Any]],
+    *,
+    app_name: str = DEFAULT_APP_NAME,
+    environment_name: str | None = None,
+) -> list[str]:
+    function = modal.Function.from_name(app_name, RENDER_FUNCTION, environment_name=environment_name)
     call_ids: list[str] = []
     for spec in specs:
         call = function.spawn(json.dumps(spec, sort_keys=True))
@@ -47,13 +62,12 @@ def main() -> None:
     parser.add_argument("--spec-file", required=True)
     parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
     parser.add_argument("--env", default="")
+    parser.add_argument("--function", choices=("phase1", "render"), default="phase1")
     args = parser.parse_args()
 
-    call_ids = submit_phase1_specs_to_deployed(
-        load_specs(Path(args.spec_file)),
-        app_name=args.app_name,
-        environment_name=args.env or None,
-    )
+    specs = load_specs(Path(args.spec_file))
+    submit = submit_render_specs_to_deployed if args.function == "render" else submit_phase1_specs_to_deployed
+    call_ids = submit(specs, app_name=args.app_name, environment_name=args.env or None)
     print(json.dumps({"app_name": args.app_name, "function_call_ids": call_ids}, indent=2, sort_keys=True))
 
 

@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from modal_runner.modal_app import _build_telemetry_render_cmd, _fallback_eval_metrics, _find_videos, _score_metrics
+from modal_runner.modal_app import (
+    _build_isaac_camera_render_cmd,
+    _build_telemetry_render_cmd,
+    _fallback_eval_metrics,
+    _find_videos,
+    _score_metrics,
+)
 
 
 def test_fallback_eval_metrics_fail_safely() -> None:
@@ -25,6 +31,22 @@ def test_telemetry_render_command_does_not_use_isaac_cameras() -> None:
     assert "--enable_cameras" not in cmd
     assert "play.py" not in " ".join(cmd)
     assert "render_telemetry_video.py" in " ".join(cmd)
+
+
+def test_isaac_camera_render_command_uses_play_video_without_seed() -> None:
+    cmd = _build_isaac_camera_render_cmd(
+        runner="rsl_rl",
+        task="Isaac-Velocity-Flat-H1-v0",
+        checkpoint_path=Path("/workspace/isaaclab/logs/rsl_rl/h1_flat/run/model_9.pt"),
+        render_spec={"num_envs": 1, "video_length": 120, "seed": 101},
+    )
+
+    joined = " ".join(cmd)
+    assert "play.py" in joined
+    assert "--video" in cmd
+    assert "--enable_cameras" in cmd
+    assert "--seed" not in cmd
+    assert "--load_run" in cmd
 
 
 def test_find_videos_lists_rendered_rollouts(tmp_path) -> None:
