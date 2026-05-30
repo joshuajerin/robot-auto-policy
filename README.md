@@ -49,15 +49,61 @@ The local loop does not require Isaac Lab. It validates patch safety, generates 
 python -m core.autoresearch_loop --dry-run --experiments 3
 ```
 
+The command writes SQLite research memory to `artifacts/research.db` by default.
+Use a different path when testing:
+
+```bash
+python -m core.autoresearch_loop \
+  --dry-run \
+  --experiments 5 \
+  --db artifacts/local_research.db
+```
+
+## Tests
+
+```bash
+pytest -q
+```
+
+The tests cover:
+
+- locked patch validation
+- YAML dry-run patch application
+- accept/reject scoring
+- scenario generation
+- SQLite research memory
+- the deterministic dry-run controller
+
 ## Isaac Lab Modal Workflow
 
 The Modal entrypoint is intentionally separated from the research controller so the evaluator and runner can be locked.
 
 ```bash
-modal run modal_runner/modal_app.py::smoke
+modal run modal_runner/modal_app.py --action smoke
 
-modal run modal_runner/modal_app.py::train_and_eval \
-  --experiment-spec-json '{"experiment_id":"baseline_001","task":"Isaac-Velocity-Flat-H1-v0"}'
+python modal_runner/train.py \
+  --experiment baseline_001 \
+  --task Isaac-Velocity-Flat-H1-v0 \
+  --num-envs 4096 \
+  --max-iterations 1000
+
+modal run modal_runner/modal_app.py \
+  --action train-and-eval \
+  --experiment-spec-json '{"experiment_id":"baseline_001","task":"Isaac-Velocity-Flat-H1-v0","num_envs":4096,"max_iterations":1000}'
+```
+
+Score a raw metrics file with the locked evaluator:
+
+```bash
+python modal_runner/evaluate.py \
+  --raw-metrics artifacts/baseline_001/raw_metrics.json \
+  --output artifacts/baseline_001/eval_metrics.json
+```
+
+Run the dashboard after a dry run:
+
+```bash
+streamlit run dashboard/app.py -- --db artifacts/research.db
 ```
 
 ## Acceptance Rule
