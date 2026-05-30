@@ -1,4 +1,6 @@
-from tools.modal_artifact_status import ExperimentArtifactStatus
+from types import SimpleNamespace
+
+from tools.modal_artifact_status import ExperimentArtifactStatus, list_experiment_files
 
 
 def test_experiment_artifact_status_flags_outputs() -> None:
@@ -42,3 +44,12 @@ def test_experiment_artifact_status_reports_missing_video() -> None:
     assert status.video_count == 0
     assert not status.ready_for_review
     assert "missing rollout video" in status.review_blockers
+
+
+def test_list_experiment_files_treats_missing_modal_directory_as_empty(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="No such file or directory")
+
+    monkeypatch.setattr("tools.modal_artifact_status.subprocess.run", fake_run)
+
+    assert list_experiment_files("robogenesis-runs", "exp_not_started") == []

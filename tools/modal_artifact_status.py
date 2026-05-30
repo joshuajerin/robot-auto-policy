@@ -114,7 +114,10 @@ def _list_files_recursive(volume: str, path: str, prefix: str) -> list[str]:
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
+        message = proc.stderr.strip() or proc.stdout.strip()
+        if _is_missing_remote_path(message):
+            return []
+        raise RuntimeError(message)
     files: list[str] = []
     try:
         entries = json.loads(proc.stdout)
@@ -131,6 +134,10 @@ def _list_files_recursive(volume: str, path: str, prefix: str) -> list[str]:
         if entry_type == "file" and value.startswith(prefix):
             files.append(str(PurePosixPath(value[len(prefix) :])))
     return files
+
+
+def _is_missing_remote_path(message: str) -> bool:
+    return "No such file or directory" in message
 
 
 def summarize_experiments(volume: str, experiment_ids: list[str]) -> list[ExperimentArtifactStatus]:
