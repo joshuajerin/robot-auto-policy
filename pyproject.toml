@@ -1,0 +1,21 @@
+[project]
+name = "robot-auto-policy"
+version = "0.1.0"
+description = "RoboGenesis autonomous AutoResearch loop for robot policy training."
+requires-python = ">=3.11"
+dependencies = [
+  "modal>=1.0.0",
+  "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+dashboard = [
+  "streamlit>=1.35.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
