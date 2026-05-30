@@ -74,6 +74,39 @@ The tests cover:
 - SQLite research memory
 - the deterministic dry-run controller
 
+## Phase 1 H1 Baseline
+
+Generate the H1 baseline experiment spec:
+
+```bash
+python modal_runner/phase1.py \
+  --experiment baseline_h1_001 \
+  --config configs/locomotion/phase1_h1.yaml
+```
+
+Launch the full phase-1 job on Modal:
+
+```bash
+python modal_runner/phase1.py \
+  --experiment baseline_h1_001 \
+  --launch-modal
+```
+
+That Modal job uses `Isaac-Velocity-Flat-H1-v0`, trains with `rsl_rl`, resolves
+the H1 asset inside the Isaac Lab container, evaluates fixed held-out seeds,
+renders an actual H1 rollout video, and writes:
+
+```text
+experiment_spec.json
+h1_asset_report.json
+raw_eval_metrics.json
+eval_metrics.json
+artifact_manifest.json
+checkpoint and video artifacts under logs/
+```
+
+See `docs/phase1_runbook.md` for the full runbook.
+
 ## Isaac Lab Modal Workflow
 
 The Modal entrypoint is intentionally separated from the research controller so the evaluator and runner can be locked.
@@ -105,6 +138,18 @@ Run the dashboard after a dry run:
 ```bash
 streamlit run dashboard/app.py -- --db artifacts/research.db
 ```
+
+## OpenAI Setup
+
+Copy `.env.example` to `.env` or export:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export OPENAI_MODEL="gpt-5.4-mini"
+```
+
+The OpenAI-backed planner returns a schema-constrained `PatchSpec`; if no key is
+set, the deterministic planner fallback is used. See `docs/openai_setup.md`.
 
 ## Acceptance Rule
 
