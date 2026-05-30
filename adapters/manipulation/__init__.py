@@ -1,0 +1,2 @@
+"""Future manipulation adapter package."""
+

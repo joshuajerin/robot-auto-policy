@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robogenesis.local/specs/eval_spec.schema.json",
+  "title": "EvalSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["num_episodes", "seed_count", "base_scenarios", "generated_scenarios"],
+  "properties": {
+    "num_episodes": {"type": "integer", "minimum": 1},
+    "seed_count": {"type": "integer", "minimum": 1},
+    "base_scenarios": {"type": "array", "items": {"type": "string"}},
+    "generated_scenarios": {"type": "array", "items": {"type": "string"}},
+    "success_condition": {"type": "string"}
+  }
+}

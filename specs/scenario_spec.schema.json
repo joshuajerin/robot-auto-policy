@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robogenesis.local/specs/scenario_spec.schema.json",
+  "title": "ScenarioSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scenario_id", "task_family", "difficulty"],
+  "properties": {
+    "scenario_id": {"type": "string", "minLength": 1},
+    "task_family": {"type": "string", "enum": ["locomotion", "manipulation", "navigation", "aerial", "locomanipulation"]},
+    "difficulty": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "terrain": {"type": "object"},
+    "disturbances": {"type": "object"},
+    "robot_variation": {"type": "object"},
+    "evaluation": {"type": "object"},
+    "status": {
+      "type": "string",
+      "enum": ["candidate", "validated", "too_easy", "learning_frontier", "too_hard", "invalid"]
+    },
+    "parent_scenario_id": {"type": ["string", "null"]}
+  }
+}

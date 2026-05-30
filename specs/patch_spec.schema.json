@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robogenesis.local/specs/patch_spec.schema.json",
+  "title": "PatchSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "experiment_name",
+    "hypothesis",
+    "allowed_files",
+    "patch",
+    "expected_effect",
+    "risk",
+    "rollback"
+  ],
+  "properties": {
+    "experiment_name": {"type": "string", "minLength": 1},
+    "hypothesis": {"type": "string", "minLength": 1},
+    "allowed_files": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1
+    },
+    "patch": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-zA-Z0-9_.-]+\\.[a-zA-Z0-9_.-]+"
+      }
+    },
+    "expected_effect": {"type": "string", "minLength": 1},
+    "risk": {"type": "string", "minLength": 1},
+    "rollback": {"type": "string", "minLength": 1}
+  }
+}
