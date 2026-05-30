@@ -76,8 +76,8 @@ GPU execution.
 
 ### Modal And Isaac Execution
 
-- `modal_runner/modal_app.py` - Modal app with H1 train/evaluate/render
-  functions, artifact syncing, scoring, and manifest creation.
+- `modal_runner/modal_app.py` - Modal app with H1 train/evaluate/non-Vulkan
+  telemetry-render functions, artifact syncing, scoring, and manifest creation.
 - `modal_runner/phase1.py` - CLI for generating phase-1 specs and launching H1
   runs locally, detached, batched, or through the deployed app.
 - `modal_runner/train.py` - helper for building training specs.
@@ -86,7 +86,9 @@ GPU execution.
 - `modal_runner/isaac_scripts/inspect_h1_asset.py` - runs inside Isaac Lab to
   report H1 asset resolution.
 - `modal_runner/isaac_scripts/evaluate_rsl_rl_policy.py` - evaluates an rsl_rl
-  checkpoint on fixed seeds.
+  checkpoint on fixed seeds and records rollout telemetry traces.
+- `modal_runner/isaac_scripts/render_telemetry_video.py` - renders MP4 rollout
+  diagnostics from telemetry without Isaac cameras, RTX, or Vulkan.
 - `modal_runner/isaac_scripts/write_artifact_manifest.py` - writes the final
   experiment artifact manifest.
 
@@ -136,6 +138,8 @@ GPU execution.
 - `tools/prepare_video_prompt.py` - legacy walking-video style context helper.
 - `tools/modal_guardian.py` - phase-1 Modal sidecar that polls app logs and
   records failure events while code is changing.
+- `tools/modal_artifact_status.py` - Modal Volume artifact status summary for
+  metrics, manifests, videos, and checkpoints.
 - `specs/` - JSON Schemas for `RobotSpec`, `TaskSpec`, `ScenarioSpec`,
   `PatchSpec`, and `EvalSpec`.
 - `docs/phase1_runbook.md` - full H1 phase-1 runbook.
@@ -241,7 +245,7 @@ python modal_runner/phase1.py \
 
 That Modal job uses `Isaac-Velocity-Flat-H1-v0`, trains with `rsl_rl`, resolves
 the H1 asset inside the Isaac Lab container, evaluates fixed held-out seeds,
-renders an actual H1 rollout video, and writes:
+renders a non-Vulkan telemetry rollout MP4, and writes:
 
 ```text
 experiment_spec.json
@@ -249,9 +253,16 @@ h1_asset_report.json
 motion_context.json
 raw_eval_metrics.json
 eval_metrics.json
+rollout_trace.json
+rollout_telemetry.mp4
+rollout_videos.json
 artifact_manifest.json
-checkpoint and video artifacts under logs/
+checkpoint artifacts under logs/
 ```
+
+Use `python tools/modal_artifact_status.py --experiment <experiment_id>` to
+confirm each run has metrics, a checkpoint, the rollout action trace, and at
+least one rollout video before reviewing or ingesting it.
 
 See `docs/phase1_runbook.md` for the full runbook.
 

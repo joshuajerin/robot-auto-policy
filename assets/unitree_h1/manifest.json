@@ -1,0 +1,40 @@
+{
+  "asset_root": "assets/unitree_h1",
+  "files": [
+    {
+      "path": "usd/h1.usd",
+      "sha256": "3f128fc0f9d66c4225f03d8a5f80570514c0b25cf2da580ddb12e536e61fd14a",
+      "size_bytes": 1600,
+      "url": "https://media.githubusercontent.com/media/unitreerobotics/unitree_model/main/H1/h1/usd/h1.usd"
+    },
+    {
+      "path": "usd/configuration/h1_base.usd",
+      "sha256": "73dea11b425beeeb28234fd63861e6ad3ed58ad66c6dfb28990fa946848f2b3c",
+      "size_bytes": 26283174,
+      "url": "https://media.githubusercontent.com/media/unitreerobotics/unitree_model/main/H1/h1/usd/configuration/h1_base.usd"
+    },
+    {
+      "path": "usd/configuration/h1_physics.usd",
+      "sha256": "58026cc629b43f8f2f84c62e2f21ecfd3b3e60173f5e7f5fd3f61aefb9ef5137",
+      "size_bytes": 7877,
+      "url": "https://media.githubusercontent.com/media/unitreerobotics/unitree_model/main/H1/h1/usd/configuration/h1_physics.usd"
+    },
+    {
+      "path": "usd/configuration/h1_sensor.usd",
+      "sha256": "ae888ecf7f281ef2628ad88024a78ae77c6d3cc1c5de41fa56074aba717d3b9f",
+      "size_bytes": 654,
+      "url": "https://media.githubusercontent.com/media/unitreerobotics/unitree_model/main/H1/h1/usd/configuration/h1_sensor.usd"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "d62cbfaf8906d8d8d2315dc43f375165a2b76a8fb56cfedecc28929ec2e83752",
+      "size_bytes": 1558,
+      "url": "https://raw.githubusercontent.com/unitreerobotics/unitree_model/main/LICENSE"
+    }
+  ],
+  "note": "Fetched from the public Unitree H1 USD media URLs. Isaac Lab still uses its task-native H1 articulation for training; this bundle is mounted into Modal for explicit asset provenance and non-Vulkan visualization/export workflows.",
+  "primary_usd": "usd/h1.usd",
+  "robot_id": "unitree_h1",
+  "source_commit_observed": "f865c72ffd0c50ad4db6a1be270eb34d22e6221e",
+  "source_repo": "https://github.com/unitreerobotics/unitree_model"
+}

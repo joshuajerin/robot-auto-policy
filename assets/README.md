@@ -1,22 +1,37 @@
 # H1 Robot Asset
 
-Phase 1 uses the real Unitree H1 model that ships with Isaac Lab / Isaac Sim
-through the task:
+Phase 1 uses the real Unitree H1 model in two places.
+
+Isaac Lab trains and evaluates the policy through the H1 task:
 
 ```text
 Isaac-Velocity-Flat-H1-v0
 ```
 
-The repository does not vendor NVIDIA/Unitree USD meshes. Instead, the Modal
-runner inspects the Isaac Lab container and writes the resolved H1 asset path to
-each experiment's artifact manifest.
+The repo can also vendor the public Unitree H1 USD bundle here:
+
+```text
+assets/unitree_h1/usd/h1.usd
+```
+
+Fetch or refresh it with:
+
+```bash
+python tools/fetch_h1_model.py --output-dir assets/unitree_h1 --refresh
+```
+
+The Modal runner bakes `assets/unitree_h1` into the image when it exists,
+records it in `h1_asset_report.json`, and exports it into each experiment
+artifact directory. The Isaac Lab task remains the source of truth for
+simulation dynamics.
 
 Expected asset identifiers:
 
 - robot id: `unitree_h1`
 - embodiment: humanoid
-- Isaac task: `Isaac-Velocity-Flat-H1-v0`
+- local USD: `assets/unitree_h1/usd/h1.usd`
+- runtime Isaac task: `Isaac-Velocity-Flat-H1-v0`
 - stretch task: `Isaac-Velocity-Rough-H1-v0`
 
 `h1_isaac_reference.usda` is a lightweight composition reference for local USD
-tooling. The actual robot mesh is resolved by Isaac Lab at runtime.
+tooling. It is not used for training.

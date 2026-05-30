@@ -27,6 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", default="101,203,307,409,503,601,709,811")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--policy-id", default="baseline_h1")
+    parser.add_argument("--trace-output", default="")
+    parser.add_argument("--trace-env-index", type=int, default=0)
+    parser.add_argument("--trace-max-steps", type=int, default=240)
     return parser.parse_args()
 
 
@@ -60,6 +63,11 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
 
     seeds = [int(seed.strip()) for seed in args_cli.seeds.split(",") if seed.strip()]
     aggregate = MetricAccumulator(policy_id=args_cli.policy_id, seed_count=len(seeds))
+    trace_recorder = TraceRecorder(
+        policy_id=args_cli.policy_id,
+        env_index=args_cli.trace_env_index,
+        max_steps=args_cli.trace_max_steps,
+    )
 
     for seed in seeds:
         env = None
@@ -91,6 +99,14 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
                 episode_lengths += 1
 
                 aggregate.observe_step(infos=infos, rewards=rewards, actions=actions, dones=dones)
+                trace_recorder.observe(
+                    seed=seed,
+                    step=step_count,
+                    obs=obs,
+                    rewards=rewards,
+                    actions=actions,
+                    dones=dones,
+                )
 
                 if bool(dones.any()):
                     done_count = int(dones.sum().item())
@@ -128,7 +144,10 @@ def evaluate_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
                 except Exception as exc:
                     print(f"[WARN] env.close failed for seed {seed}: {type(exc).__name__}: {exc}", flush=True)
 
-    return aggregate.to_metrics()
+    metrics = aggregate.to_metrics()
+    if args_cli.trace_output:
+        trace_recorder.write(Path(args_cli.trace_output), metrics=metrics)
+    return metrics
 
 
 def _load_rsl_rl_agent_cfg(args_cli: argparse.Namespace) -> Any | None:
@@ -252,6 +271,63 @@ class MetricAccumulator:
                 "after generated scenario evaluation is enabled."
             ),
         }
+
+
+class TraceRecorder:
+    """Collect one rollout trace for non-Vulkan diagnostic rendering."""
+
+    def __init__(self, policy_id: str, env_index: int, max_steps: int):
+        self.policy_id = policy_id
+        self.env_index = max(0, env_index)
+        self.max_steps = max(0, max_steps)
+        self.frames: list[dict[str, Any]] = []
+        self.seed: int | None = None
+
+    def observe(self, *, seed: int, step: int, obs: Any, rewards: Any, actions: Any, dones: Any) -> None:
+        if self.max_steps == 0 or len(self.frames) >= self.max_steps:
+            return
+        if self.seed is None:
+            self.seed = seed
+        if seed != self.seed:
+            return
+
+        index = self.env_index
+        try:
+            obs_row = obs[index].detach().float().cpu().tolist()
+            action_row = actions[index].detach().float().cpu().tolist()
+            reward = float(rewards[index].detach().float().cpu().item())
+            done = bool(dones[index].detach().cpu().item())
+        except Exception:
+            return
+
+        self.frames.append(
+            {
+                "step": step,
+                "seed": seed,
+                "reward": reward,
+                "done": done,
+                "base_lin_vel": obs_row[0:3],
+                "base_ang_vel": obs_row[3:6],
+                "projected_gravity": obs_row[6:9],
+                "velocity_command": obs_row[9:12],
+                "joint_pos": obs_row[12:31],
+                "joint_vel": obs_row[31:50],
+                "actions": action_row,
+            }
+        )
+
+    def write(self, path: Path, *, metrics: dict[str, Any]) -> None:
+        payload = {
+            "policy_id": self.policy_id,
+            "seed": self.seed,
+            "env_index": self.env_index,
+            "frame_count": len(self.frames),
+            "metrics": metrics,
+            "frames": self.frames,
+            "render_note": "Telemetry trace for non-Vulkan diagnostic rollout rendering.",
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _dict_like(value: Any) -> dict[str, Any]:

@@ -1,7 +1,9 @@
 {
   "robot_id": "unitree_h1",
   "embodiment_type": "humanoid",
-  "asset_path": "resolved_by_isaac_lab:Isaac-Velocity-Flat-H1-v0",
+  "asset_path": "assets/unitree_h1/usd/h1.usd",
+  "runtime_asset_path": "resolved_by_isaac_lab:Isaac-Velocity-Flat-H1-v0",
+  "asset_source": "https://github.com/unitreerobotics/unitree_model/tree/main/H1/h1/usd",
   "num_dofs": 19,
   "controlled_joints": [
     "left_hip_yaw",

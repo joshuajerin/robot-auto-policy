@@ -24,6 +24,7 @@ SCALEDOWN_WINDOW_SECONDS = 300
 TIMEOUT_SECONDS = 6 * 60 * 60
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REMOTE_SCRIPT_ROOT = Path("/robogenesis/isaac_scripts")
+REMOTE_H1_ASSET_ROOT = Path("/robogenesis/assets/unitree_h1")
 ISAAC_LAB_ROOT_CANDIDATES = (
     Path("/workspace/IsaacLab"),
     Path("/workspace/isaaclab"),
@@ -37,6 +38,7 @@ app = modal.App(APP_NAME)
 image = (
     modal.Image.from_registry(ISAAC_LAB_IMAGE, add_python="3.10")
     .entrypoint([])
+    .pip_install("matplotlib>=3.8", "imageio>=2.33", "imageio-ffmpeg>=0.4", "numpy>=1.24")
     .env({"ACCEPT_EULA": "Y", "PRIVACY_CONSENT": "Y", "PYTHONUNBUFFERED": "1"})
 )
 try:
@@ -45,6 +47,11 @@ except AttributeError:
     # Older Modal clients may not expose add_local_dir at import time. The
     # scripts can still be baked into a custom image or copied manually.
     pass
+if (REPO_ROOT / "assets" / "unitree_h1").exists():
+    try:
+        image = image.add_local_dir(REPO_ROOT / "assets" / "unitree_h1", remote_path=str(REMOTE_H1_ASSET_ROOT))
+    except AttributeError:
+        pass
 
 runs_volume = modal.Volume.from_name("robogenesis-runs", create_if_missing=True)
 volumes = {"/runs": runs_volume}
@@ -128,9 +135,13 @@ def _checkpoint_sort_key(path: Path) -> tuple[int, str]:
     return (int(match.group(1)) if match else -1, str(path))
 
 
+def _find_videos(artifact_root: Path) -> list[str]:
+    return [str(path) for path in sorted(artifact_root.rglob("*.mp4"))]
+
+
 def _find_video(artifact_root: Path) -> str | None:
-    videos = sorted(artifact_root.rglob("*.mp4"))
-    return str(videos[-1]) if videos else None
+    videos = _find_videos(artifact_root)
+    return videos[-1] if videos else None
 
 
 def _score_metrics(raw_metrics: dict[str, Any]) -> dict[str, Any]:
@@ -288,16 +299,21 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         )
 
     h1_report_path = artifact_root / "h1_asset_report.json"
+    h1_export_dir = artifact_root / "h1_asset_export"
     _run(
         [
-            "python",
+            "./isaaclab.sh",
+            "-p",
             str(REMOTE_SCRIPT_ROOT / "inspect_h1_asset.py"),
             "--task",
             task,
             "--output",
             str(h1_report_path),
-        ],
-        cwd=Path("/"),
+            "--bundled-asset-dir",
+            str(REMOTE_H1_ASSET_ROOT),
+            "--export-dir",
+            str(h1_export_dir),
+        ]
     )
 
     train_script = f"scripts/reinforcement_learning/{runner}/train.py"
@@ -326,8 +342,10 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
 
     checkpoint_path = _find_checkpoint(experiment_id, str(render_spec.get("checkpoint", "latest")))
     print(f"Selected checkpoint: {checkpoint_path}", flush=True)
+    _sync_artifacts(experiment_id)
 
     raw_metrics_path = artifact_root / "raw_eval_metrics.json"
+    rollout_trace_path = artifact_root / "rollout_trace.json"
     eval_cmd = [
         "./isaaclab.sh",
         "-p",
@@ -350,9 +368,14 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         device,
         "--policy-id",
         experiment_id,
+        "--trace-output",
+        str(rollout_trace_path),
+        "--trace-max-steps",
+        str(int(render_spec.get("trace_max_steps", render_spec.get("video_length", 240)))),
     ]
+    eval_timeout = int(eval_spec.get("command_timeout_seconds", 300))
     try:
-        _run(eval_cmd)
+        _run(_with_timeout(eval_cmd, eval_timeout), ok_codes=(0, 124) if eval_timeout > 0 else (0,))
     except subprocess.CalledProcessError as exc:
         raw_metrics_path.write_text(
             json.dumps(_fallback_eval_metrics(experiment_id, f"eval command failed with exit code {exc.returncode}"), indent=2, sort_keys=True)
@@ -368,10 +391,10 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
     score_path = artifact_root / "eval_metrics.json"
     score_path.write_text(json.dumps(score, indent=2, sort_keys=True) + "\n")
 
-    render_cmd = _build_render_cmd(
-        runner=runner,
-        task=task,
-        checkpoint_path=checkpoint_path,
+    render_cmd = _build_telemetry_render_cmd(
+        trace_path=rollout_trace_path,
+        score_path=score_path,
+        output_path=artifact_root / "rollout_telemetry.mp4",
         render_spec=render_spec,
     )
     render_error_path = artifact_root / "render_error.json"
@@ -383,7 +406,7 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
                 {
                     "command": exc.cmd,
                     "returncode": exc.returncode,
-                    "note": "Render failed; preserving train/eval artifacts and manifest without rollout video.",
+                    "note": "Telemetry render failed; preserving train/eval artifacts and manifest without rollout video.",
                 },
                 indent=2,
                 sort_keys=True,
@@ -392,7 +415,24 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         )
 
     synced_root = Path(_sync_artifacts(experiment_id))
-    rollout_video_path = _find_video(synced_root)
+    rollout_video_paths = _find_videos(synced_root)
+    rollout_video_path = rollout_video_paths[-1] if rollout_video_paths else None
+    score["rollout_video_path"] = rollout_video_path
+    score["rollout_video_paths"] = rollout_video_paths
+    score_path.write_text(json.dumps(score, indent=2, sort_keys=True) + "\n")
+    (synced_root / "rollout_videos.json").write_text(
+        json.dumps(
+            {
+                "experiment_id": experiment_id,
+                "primary_video_path": rollout_video_path,
+                "video_count": len(rollout_video_paths),
+                "video_paths": rollout_video_paths,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
     manifest_path = synced_root / "artifact_manifest.json"
     _run(
         [
@@ -414,6 +454,8 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
             rollout_video_path or "",
             "--h1-asset-report",
             str(h1_report_path),
+            "--rollout-trace",
+            str(rollout_trace_path if rollout_trace_path.exists() else ""),
             "--output",
             str(manifest_path),
         ],
@@ -434,31 +476,26 @@ def _load_metrics_if_present(artifact_root: Path, experiment_id: str) -> dict[st
     }
 
 
-def _build_render_cmd(
+def _build_telemetry_render_cmd(
     *,
-    runner: str,
-    task: str,
-    checkpoint_path: Path,
+    trace_path: Path,
+    score_path: Path,
+    output_path: Path,
     render_spec: dict[str, Any],
 ) -> list[str]:
-    # Isaac Lab rsl_rl/play.py does not accept a seed argument in 2.0.x.
     return [
-        "./isaaclab.sh",
-        "-p",
-        f"scripts/reinforcement_learning/{runner}/play.py",
-        "--task",
-        task,
-        "--headless",
-        "--num_envs",
-        str(int(render_spec.get("num_envs", 1))),
-        "--load_run",
-        checkpoint_path.parent.name,
-        "--checkpoint",
-        checkpoint_path.name,
-        "--video",
-        "--video_length",
-        str(int(render_spec.get("video_length", 240))),
-        "--enable_cameras",
+        "python",
+        str(REMOTE_SCRIPT_ROOT / "render_telemetry_video.py"),
+        "--trace",
+        str(trace_path),
+        "--metrics",
+        str(score_path),
+        "--output",
+        str(output_path),
+        "--title",
+        str(render_spec.get("title", "RoboGenesis H1 telemetry rollout")),
+        "--fps",
+        str(int(render_spec.get("fps", 20))),
     ]
 
 

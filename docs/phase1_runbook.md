@@ -5,7 +5,7 @@ Phase 1 is the non-agent baseline:
 1. train an H1 locomotion policy in Isaac Lab
 2. save a checkpoint
 3. evaluate fixed held-out seeds
-4. render an actual Isaac H1 rollout video
+4. render a non-Vulkan telemetry rollout MP4
 5. write raw metrics, score JSON, and artifact manifest
 
 ## Prerequisites
@@ -66,6 +66,10 @@ The motion context is copied into the Modal artifact directory as
 are not tied to a local log tail. The default phase-1 config runs only 10 PPO
 iterations with one held-out eval seed so train/eval/render can be debugged
 quickly before scaling.
+
+Phase 1 does not call Isaac camera rendering. `evaluate_rsl_rl_policy.py`
+records rollout telemetry, and `render_telemetry_video.py` converts that trace
+to MP4 without Vulkan, RTX, `play.py --video`, or `--enable_cameras`.
 
 ## Autoscaled Batch
 
@@ -131,6 +135,9 @@ The phase-1 job writes to the `robogenesis-runs` Modal volume:
   h1_asset_report.json
   raw_eval_metrics.json
   eval_metrics.json
+  rollout_trace.json
+  rollout_telemetry.mp4
+  rollout_videos.json
   artifact_manifest.json
   logs/
     rsl_rl/
@@ -145,6 +152,21 @@ Download:
 ```bash
 modal volume get robogenesis-runs /experiments ./modal_experiments
 ```
+
+Check that each run has the policy checkpoint, eval metrics, manifest, and
+non-Vulkan rollout video needed for review:
+
+```bash
+python tools/modal_artifact_status.py \
+  --experiment baseline_h1_cmu_walk-seed-42 \
+  --experiment baseline_h1_cmu_walk-seed-43
+```
+
+`ready_for_review` is true only when the run has metrics, a checkpoint, a
+manifest, a rollout telemetry trace, and at least one `.mp4` rollout video. The
+manifest records `rollout_trace_path`, `rollout_video_paths`, and relative
+`rollout_video_files`, so downloaded artifacts can still find the videos
+locally.
 
 ## Notes For Robot Researchers
 

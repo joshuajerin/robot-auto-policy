@@ -15,10 +15,15 @@ eval:
   num_envs: 8
   episodes_per_seed: 1
   max_steps_per_episode: 1000
+  command_timeout_seconds: 300
   seeds: [101]
 render:
+  mode: telemetry
   num_envs: 1
   video_length: 60
+  trace_max_steps: 120
+  fps: 20
+  command_timeout_seconds: 300
   checkpoint: latest
 artifacts:
   modal_volume: robogenesis-runs

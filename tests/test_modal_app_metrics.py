@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from modal_runner.modal_app import _build_render_cmd, _fallback_eval_metrics, _score_metrics
+from modal_runner.modal_app import _build_telemetry_render_cmd, _fallback_eval_metrics, _find_videos, _score_metrics
 
 
 def test_fallback_eval_metrics_fail_safely() -> None:
@@ -13,14 +13,25 @@ def test_fallback_eval_metrics_fail_safely() -> None:
     assert score["total_score"] == 0.0
 
 
-def test_render_command_does_not_pass_unsupported_seed() -> None:
-    cmd = _build_render_cmd(
-        runner="rsl_rl",
-        task="Isaac-Velocity-Flat-H1-v0",
-        checkpoint_path=Path("/logs/rsl_rl/h1_flat/run/model_9.pt"),
-        render_spec={"num_envs": 1, "video_length": 60, "seed": 907},
+def test_telemetry_render_command_does_not_use_isaac_cameras() -> None:
+    cmd = _build_telemetry_render_cmd(
+        trace_path=Path("/runs/experiments/quick/rollout_trace.json"),
+        score_path=Path("/runs/experiments/quick/eval_metrics.json"),
+        output_path=Path("/runs/experiments/quick/rollout_telemetry.mp4"),
+        render_spec={"video_length": 60, "seed": 907, "fps": 20},
     )
 
     assert "--seed" not in cmd
-    assert "--load_run" in cmd
-    assert "run" in cmd
+    assert "--enable_cameras" not in cmd
+    assert "play.py" not in " ".join(cmd)
+    assert "render_telemetry_video.py" in " ".join(cmd)
+
+
+def test_find_videos_lists_rendered_rollouts(tmp_path) -> None:
+    first = tmp_path / "logs" / "rsl_rl" / "run" / "videos" / "rollout_a.mp4"
+    second = tmp_path / "logs" / "rsl_rl" / "run" / "videos" / "rollout_b.mp4"
+    first.parent.mkdir(parents=True)
+    first.write_bytes(b"video-a")
+    second.write_bytes(b"video-b")
+
+    assert _find_videos(tmp_path) == [str(first), str(second)]
