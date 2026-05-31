@@ -1,0 +1,12 @@
+robogenesis-autoresearch-dry-run:
+  command: python tools/replay_server.py
+
+  input:
+    experiments: number
+
+  prefillFromTrace:
+    experiments: properties.experiments
+
+  models:
+    - deterministic-local
+    - gpt-5.4-mini

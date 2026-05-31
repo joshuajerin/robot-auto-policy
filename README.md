@@ -1,12 +1,15 @@
 # RoboGenesis / Real2Sim AutoResearch
 
-RoboGenesis is a generalized autonomous training loop for robot policies. It starts with locomotion and turns the manual robotics outer loop into a constrained AutoResearch cycle:
+RoboGenesis is a generalized autonomous training loop for robot policies. It
+starts with locomotion and turns the manual robotics outer loop into a
+constrained AutoResearch cycle:
 
 ```text
 propose -> patch -> train -> evaluate -> diagnose -> generate scenarios -> keep/revert -> repeat
 ```
 
-The first implementation target is Isaac Lab locomotion on Modal. The system keeps the loop disciplined:
+The first implementation target is Isaac Lab locomotion on Modal. The system
+keeps the loop disciplined:
 
 - the research agent submits structured `PatchSpec` objects
 - patches are limited to approved locomotion config files
@@ -37,9 +40,43 @@ configs/locomotion/        Safe editable configs for the first task family
 agents/                    Structured proposal helpers and prompt templates
 modal_runner/              Modal/Isaac execution entrypoints
 eval/                      Locked seeds and safety/evaluation logic
-dashboard/                 Lightweight Streamlit dashboard skeleton
+dashboard/                 Streamlit run-review dashboard with video discovery
+tools/                     Artifact sync, replay, render publishing, and helpers
+docs/                      Runbooks, Workshop setup, and implementation notes
+artifacts/                 Ignored local DBs, Modal downloads, renders, and logs
+external/                  Ignored local checkouts such as Raindrop Workshop
 tests/                     Unit tests for local deterministic components
 ```
+
+## Quickstart
+
+Install the local package with development and dashboard extras:
+
+```bash
+python -m pip install -e '.[dev,dashboard]'
+```
+
+Run the deterministic local loop:
+
+```bash
+python -m core.autoresearch_loop --dry-run --experiments 3
+```
+
+Open the Streamlit review dashboard against the default SQLite memory:
+
+```bash
+streamlit run dashboard/app.py -- --db artifacts/research.db
+```
+
+Start the Raindrop Workshop trace/video dashboard:
+
+```bash
+tools/raindrop_dashboard.sh
+```
+
+That script expects an ignored local Workshop checkout at
+`external/raindrop-workshop/`. See `docs/agent_eval_workshop.md` for setup and
+replay details.
 
 ## Project Layout
 
@@ -130,7 +167,8 @@ GPU execution.
 - `eval/fixed_eval_seeds.json` - locked held-out evaluation seeds.
 - `eval/locomotion_score.py` - CLI wrapper for locked scoring.
 - `eval/safety_checks.py` - safety checks outside the editable agent surface.
-- `dashboard/app.py` - Streamlit dashboard skeleton for research memory.
+- `dashboard/app.py` - Streamlit dashboard for research memory, accepted/rejected
+  run review, system graph summaries, and inline rollout/video artifacts.
 - `dashboard/components/` - dashboard loaders for experiments, metrics,
   scenarios, and rollout videos.
 - `tools/prepare_motion_reference.py` - prepares a CMU mocap walking reference
@@ -140,18 +178,30 @@ GPU execution.
   records failure events while code is changing.
 - `tools/modal_artifact_status.py` - Modal Volume artifact status summary for
   metrics, manifests, videos, and checkpoints.
+- `tools/replay_server.py` - local Raindrop replay server plus browser-safe
+  artifact and MP4 byte-range endpoints.
+- `tools/publish_raindrop_renders.py` - scans local render folders and
+  republishes MP4-backed runs into Raindrop Workshop.
+- `tools/raindrop_dashboard.sh` - starts Workshop, starts the replay/video
+  server, registers the replay agent, and publishes local render runs.
 - `specs/` - JSON Schemas for `RobotSpec`, `TaskSpec`, `ScenarioSpec`,
   `PatchSpec`, and `EvalSpec`.
 - `docs/phase1_runbook.md` - full H1 phase-1 runbook.
 - `docs/modal_guardian.md` - always-on Modal monitoring workflow.
 - `docs/openai_setup.md` - OpenAI key/model setup.
 - `docs/implementation_log.md` - implementation history.
+- `docs/agent_eval_workshop.md` - Raindrop Workshop setup, replay registration,
+  and render-video publishing workflow.
+- `docs/problem_we_are_solving_script.md` - technical demo script for explaining
+  the robotics AutoResearch loop with render videos.
 - `tests/` - unit tests for patch safety, scoring, scenarios, DB, phase-1
   specs, video context, OpenAI fallback, and dry-run orchestration.
 
 ## Local Dry Run
 
-The local loop does not require Isaac Lab. It validates patch safety, generates scenarios, computes deterministic toy metrics, applies the accept/reject rule, and records lineage.
+The local loop does not require Isaac Lab. It validates patch safety, generates
+scenarios, computes deterministic toy metrics, applies the accept/reject rule,
+and records lineage.
 
 ```bash
 python -m core.autoresearch_loop --dry-run --experiments 3
@@ -181,6 +231,82 @@ The tests cover:
 - scenario generation
 - SQLite research memory
 - the deterministic dry-run controller
+- artifact ingestion and render-video discovery
+- Raindrop trace metadata and render publishing
+
+## Raindrop Workshop And Render Videos
+
+RoboGenesis records two complementary review surfaces:
+
+- Streamlit reads `artifacts/research.db` and local artifact folders to show
+  experiment lineage, scores, review reasons, and all discovered rollout videos.
+- Raindrop Workshop reads traced runs and spans, then shows the run timeline,
+  task outputs, replay controls, and render videos attached to each run.
+
+The local Workshop setup is intentionally kept out of git because it is a
+large external checkout:
+
+```bash
+git clone https://github.com/raindrop-ai/workshop.git external/raindrop-workshop
+cd external/raindrop-workshop
+bun install
+```
+
+Once the checkout exists, use the repo script from the project root:
+
+```bash
+tools/raindrop_dashboard.sh
+```
+
+It starts:
+
+```text
+Raindrop Workshop: http://localhost:5899
+Replay/video server: http://localhost:61020
+```
+
+The script also registers `.raindrop/agents.yaml` and publishes local render
+folders from `artifacts/` into Workshop. Published run metadata includes:
+
+```text
+video_count
+primary_video_path
+primary_video_page
+video_pages
+video_artifacts[]
+```
+
+Each `video_artifacts[]` entry contains a label, resolved local path, browser
+viewer URL, and raw MP4 URL. The raw endpoint is served by
+`tools/replay_server.py` at `/artifact-file?path=...` and supports HTTP byte
+ranges, which lets the Workshop UI use normal `<video controls>` playback.
+
+For a single replay/video server without republishing runs:
+
+```bash
+python tools/replay_server.py
+```
+
+For publishing only:
+
+```bash
+RAINDROP_LOCAL_DEBUGGER=http://localhost:5899/v1/ \
+python tools/publish_raindrop_renders.py --db artifacts/research.db
+```
+
+## Generated Files And Cleanup
+
+The repo deliberately ignores generated and local-machine state:
+
+- `artifacts/` for SQLite DBs, Modal downloads, rendered MP4s, manifests, and
+  transient review output
+- `external/` for large local checkouts such as Raindrop Workshop
+- `.env`, local MCP/editor folders, Python caches, logs, and OS metadata
+
+Safe cleanup targets are Python cache folders, `.pytest_cache`, `.DS_Store`,
+and transient `*.log` files. Do not delete `artifacts/` wholesale if you still
+need local videos in Streamlit or Raindrop Workshop; both dashboards resolve
+MP4s from that tree.
 
 ## Phase 1 H1 Baseline
 
@@ -285,7 +411,8 @@ See `docs/phase1_runbook.md` for the full runbook.
 
 ## Isaac Lab Modal Workflow
 
-The Modal entrypoint is intentionally separated from the research controller so the evaluator and runner can be locked.
+The Modal entrypoint is intentionally separated from the research controller so
+the evaluator and runner can be locked.
 
 ```bash
 modal run modal_runner/modal_app.py --action smoke
@@ -338,4 +465,6 @@ new.eval_seed_count >= MIN_EVAL_SEEDS
 not new.reward_hacking_detected
 ```
 
-The point is not to let an LLM control a robot. The LLM proposes bounded research changes; Isaac Lab, PPO, the evaluator, and the safety checks decide whether those changes survive.
+The point is not to let an LLM control a robot. The LLM proposes bounded
+research changes; Isaac Lab, PPO, the evaluator, and the safety checks decide
+whether those changes survive.

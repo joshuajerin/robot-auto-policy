@@ -8,6 +8,7 @@ venv/
 .env
 .env.*
 !.env.example
+*.log
 *.db
 *.sqlite
 *.sqlite3
@@ -15,4 +16,10 @@ artifacts/*
 !artifacts/.gitkeep
 modal_runs/
 external/
+.agents/
+.claude/
+.codex/
+.cursor/
+.mcp.json
+opencode.json
 .DS_Store
