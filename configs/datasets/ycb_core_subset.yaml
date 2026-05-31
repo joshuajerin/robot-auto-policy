@@ -1,0 +1,30 @@
+dataset_id: ycb_core_subset_v1
+dataset_name: YCB Object and Model Set subset
+source_homepage: https://www.ycbbenchmarks.com/object-models/
+license_note: "Check the YCB dataset terms before redistribution; importer stores downloaded assets outside source control."
+format: mesh_archive
+output_layout:
+  raw: raw
+  extracted: extracted
+  normalized: normalized
+objects:
+  - object_id: "003_cracker_box"
+    role: target_or_distractor
+    category: box
+    archive_url: http://ycb-benchmarks.s3-website-us-east-1.amazonaws.com/data/google/003_cracker_box_google_16k.tgz
+    expected_archive_name: 003_cracker_box_google_16k.tgz
+  - object_id: "004_sugar_box"
+    role: target_or_distractor
+    category: box
+    archive_url: http://ycb-benchmarks.s3-website-us-east-1.amazonaws.com/data/google/004_sugar_box_google_16k.tgz
+    expected_archive_name: 004_sugar_box_google_16k.tgz
+  - object_id: "006_mustard_bottle"
+    role: target_or_distractor
+    category: bottle
+    archive_url: http://ycb-benchmarks.s3-website-us-east-1.amazonaws.com/data/google/006_mustard_bottle_google_16k.tgz
+    expected_archive_name: 006_mustard_bottle_google_16k.tgz
+  - object_id: "010_potted_meat_can"
+    role: target_or_distractor
+    category: can
+    archive_url: http://ycb-benchmarks.s3-website-us-east-1.amazonaws.com/data/google/010_potted_meat_can_google_16k.tgz
+    expected_archive_name: 010_potted_meat_can_google_16k.tgz
