@@ -1,7 +1,7 @@
 reward_weights:
   task_completion: 1.0
-  grasp_success: 0.8
-  stable_lift: 0.7
+  secure_contact: 0.8
+  stable_object_motion: 0.7
   placement_accuracy: 0.75
   object_stability: 0.45
   contact_quality: 0.35

@@ -11,7 +11,12 @@ def score_manipulation(raw_metrics: dict[str, Any]) -> ScoreBreakdown:
     policy_id = str(raw_metrics.get("policy_id", "unknown_manipulation_policy"))
     task_success = _clamp01(raw_metrics.get("task_success_rate", raw_metrics.get("success_rate", 0.0)))
     task_progress = _clamp01(raw_metrics.get("task_progress", raw_metrics.get("completion_rate", task_success)))
-    grasp_stability = _clamp01(raw_metrics.get("grasp_stability", raw_metrics.get("grasp_success_rate", 0.0)))
+    contact_stability = _clamp01(
+        raw_metrics.get(
+            "contact_stability",
+            raw_metrics.get("contact_success_rate", 0.0),
+        )
+    )
     placement_accuracy = _clamp01(raw_metrics.get("placement_accuracy", 1.0 - float(raw_metrics.get("placement_error_m", 1.0))))
     generated_success = _clamp01(raw_metrics.get("generated_scenario_success", 0.0))
     energy_efficiency = _clamp01(raw_metrics.get("energy_efficiency", 1.0))
@@ -25,7 +30,7 @@ def score_manipulation(raw_metrics: dict[str, Any]) -> ScoreBreakdown:
     total_score = (
         0.25 * task_success
         + 0.15 * task_progress
-        + 0.15 * grasp_stability
+        + 0.15 * contact_stability
         + 0.15 * placement_accuracy
         + 0.10 * generated_success
         + 0.08 * energy_efficiency
@@ -40,7 +45,7 @@ def score_manipulation(raw_metrics: dict[str, Any]) -> ScoreBreakdown:
         total_score=max(0.0, min(1.0, total_score)),
         command_tracking=task_progress,
         survival_no_fall=task_success,
-        stability=grasp_stability,
+        stability=contact_stability,
         generated_scenario_success=generated_success,
         gait_quality=placement_accuracy,
         energy_efficiency=energy_efficiency,

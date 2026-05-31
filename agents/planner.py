@@ -130,22 +130,22 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
     adapter = ManipulationAdapter()
     failure = _primary_failure(context)
 
-    if failure in {"missed_grasp", "unstable_grasp"}:
+    if failure in {"missed_contact", "unstable_contact"}:
         return PatchSpec(
-            experiment_name="improve_grasp_acquisition",
-            hypothesis="The policy is failing because target approach and stable closure are underweighted.",
+            experiment_name="improve_h1_contact_acquisition",
+            hypothesis="The H1 policy is failing because arm approach and stable end-effector contact are underweighted.",
             allowed_files=[
                 "configs/manipulation/rewards.yaml",
                 "configs/manipulation/curriculum.yaml",
             ],
             patch={
-                "reward_weights.grasp_success": 1.0,
+                "reward_weights.secure_contact": 1.0,
                 "reward_weights.contact_quality": 0.5,
                 "curriculum.target_pose_randomization_end_m": 0.12,
             },
-            expected_effect="Higher grasp success with less early pose-randomization pressure.",
+            expected_effect="Higher H1 contact success with less early pose-randomization pressure.",
             risk="May overfit to easy target poses and under-train placement.",
-            rollback="Restore grasp/contact weights and target pose randomization end value.",
+            rollback="Restore contact weights and target pose randomization end value.",
         )
 
     if failure == "object_slip":
@@ -158,18 +158,18 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
             ],
             patch={
                 "reward_weights.object_stability": 0.65,
-                "reward_weights.stable_lift": 0.85,
+                "reward_weights.stable_object_motion": 0.85,
                 "domain_randomization.object_friction_range": [0.35, 1.25],
             },
             expected_effect="Lower object slip under friction variation.",
-            risk="May create overly slow or conservative lifting.",
-            rollback="Restore object stability, stable lift, and object friction range.",
+            risk="May create overly slow or conservative object motion.",
+            rollback="Restore object stability, stable object motion, and object friction range.",
         )
 
     if failure == "placement_miss":
         return PatchSpec(
             experiment_name="tighten_goal_placement",
-            hypothesis="Placement is failing because lift reward dominates goal-pose precision.",
+            hypothesis="Placement is failing because object-motion reward dominates goal-pose precision.",
             allowed_files=[
                 "configs/manipulation/rewards.yaml",
                 "configs/manipulation/curriculum.yaml",
@@ -214,9 +214,10 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
             patch={
                 "reward_weights.force_penalty": 0.45,
                 "domain_randomization.object_mass_scale": [0.8, 2.0],
+                "domain_randomization.arm_contact_force_scale": [0.75, 1.0],
                 "curriculum.object_mass_scale_end": 2.0,
             },
-            expected_effect="Lower force violations with more stable heavy-object lifting.",
+            expected_effect="Lower force violations with more stable heavy-object motion.",
             risk="May reduce success on the heaviest generated objects.",
             rollback="Restore force penalty and object mass ranges.",
         )
@@ -226,7 +227,7 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
         hypothesis="No dominant manipulation failure is isolated, so improve base task completion first.",
         allowed_files=adapter.allowed_patch_paths()[:1],
         patch={"reward_weights.task_completion": 1.15},
-        expected_effect="Higher pick/place completion under fixed scenarios.",
+        expected_effect="Higher H1 object-interaction completion under fixed scenarios.",
         risk="Could over-prioritize completion over contact quality.",
         rollback="Restore task completion reward.",
     )
@@ -254,8 +255,8 @@ def _primary_failure(context: dict[str, Any]) -> str:
                 "fails_on_rough_terrain",
                 "torso_pitch_instability",
                 "excessive_energy",
-                "missed_grasp",
-                "unstable_grasp",
+                "missed_contact",
+                "unstable_contact",
                 "object_slip",
                 "placement_miss",
                 "collision_with_clutter",

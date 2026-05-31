@@ -1,3 +1,12 @@
+robot_id: unitree_h1
+robot_spec: assets/h1_robot_spec.json
+base_env: RoboGenesis-H1-Tabletop-Manipulation-v0
+requires_custom_env: true
+end_effector:
+  mode: h1_arm_contact
+  left_link: left_elbow
+  right_link: right_elbow
+  note: "Isaac Lab has no stock H1 manipulation task in this image; do not substitute Franka or UR10."
 asset_root: assets/manipulation_objects
 manifest: assets/manipulation_objects/manifest.json
 default_object_set:

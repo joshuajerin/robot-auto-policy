@@ -11,12 +11,12 @@ from core.schemas import ScenarioSpec
 
 
 SCENARIO_SEQUENCE = [
-    "single_cube_lift",
+    "single_cube_move",
     "target_pose_place",
-    "cluttered_pick",
+    "cluttered_target_interaction",
     "distractor_occlusion",
     "low_friction_object",
-    "heavy_object_pick",
+    "heavy_object_move",
     "narrow_bin_place",
     "mixed_clutter_generalization",
 ]
@@ -57,9 +57,9 @@ def classify_manipulation_frontier(success_rate: float) -> str:
 
 def _initial_batch(seen_ids: set[str]) -> list[ScenarioSpec]:
     return [
-        _make_scenario("single_cube_lift", 0.10, seen_ids=seen_ids),
+        _make_scenario("single_cube_move", 0.10, seen_ids=seen_ids),
         _make_scenario("target_pose_place", 0.22, seen_ids=seen_ids),
-        _make_scenario("cluttered_pick", 0.34, seen_ids=seen_ids),
+        _make_scenario("cluttered_target_interaction", 0.34, seen_ids=seen_ids),
         _make_scenario("distractor_occlusion", 0.42, seen_ids=seen_ids),
     ]
 
@@ -99,14 +99,14 @@ def _mutate_from_frontier(latest: dict[str, dict[str, Any]], seen_ids: set[str])
 def _failure_conditioned_scenarios(history: ExperimentHistory, seen_ids: set[str]) -> list[ScenarioSpec]:
     failure_text = " ".join(_jsonish(report) for report in history.failure_reports).lower()
     proposals: list[ScenarioSpec] = []
-    if "grasp" in failure_text or "slip" in failure_text:
+    if "contact" in failure_text or "slip" in failure_text:
         proposals.append(_make_scenario("low_friction_object", 0.38, seen_ids=seen_ids))
     if "occlusion" in failure_text or "clutter" in failure_text:
         proposals.append(_make_scenario("distractor_occlusion", 0.46, seen_ids=seen_ids))
     if "placement" in failure_text or "miss" in failure_text:
         proposals.append(_make_scenario("target_pose_place", 0.36, seen_ids=seen_ids))
     if "mass" in failure_text or "force" in failure_text:
-        proposals.append(_make_scenario("heavy_object_pick", 0.44, seen_ids=seen_ids))
+        proposals.append(_make_scenario("heavy_object_move", 0.44, seen_ids=seen_ids))
     return proposals
 
 
@@ -129,10 +129,10 @@ def _make_scenario(
     scenario_id = _next_scenario_id(kind, seen_ids)
     workspace = _workspace(difficulty)
     objects = _objects_for_kind(kind, difficulty)
-    task_graph = ["approach_target", "close_gripper", "lift_target"]
+    task_graph = ["balance_before_reach", "approach_target", "establish_end_effector_contact", "secure_target"]
     evaluation: dict[str, Any] = {
         "num_episodes": 64,
-        "success_condition": "lift_target_10cm",
+        "success_condition": "h1_secure_and_move_target_10cm",
         "max_steps": 240,
     }
     robot_variation: dict[str, Any] = {}
@@ -140,28 +140,48 @@ def _make_scenario(
 
     if kind == "target_pose_place":
         task_graph.append("place_at_goal")
-        evaluation["success_condition"] = "place_target_within_5cm"
+        evaluation["success_condition"] = "h1_place_target_within_5cm"
         evaluation["placement_tolerance_m"] = round(max(0.025, 0.07 - difficulty * 0.04), 3)
-    elif kind == "cluttered_pick":
-        task_graph = ["segment_target", "approach_target", "avoid_clutter", "grasp_target", "lift_target"]
-        evaluation["success_condition"] = "lift_target_without_clutter_collision"
+    elif kind == "cluttered_target_interaction":
+        task_graph = [
+            "balance_before_reach",
+            "segment_target",
+            "approach_target",
+            "avoid_clutter",
+            "secure_target",
+            "move_target",
+        ]
+        evaluation["success_condition"] = "h1_move_target_without_clutter_collision"
     elif kind == "distractor_occlusion":
-        task_graph = ["move_occluder_if_needed", "approach_target", "grasp_target", "lift_target"]
-        evaluation["success_condition"] = "recover_visible_target_and_lift"
+        task_graph = ["balance_before_reach", "move_occluder_if_needed", "approach_target", "secure_target", "move_target"]
+        evaluation["success_condition"] = "h1_recover_visible_target_and_move"
     elif kind == "low_friction_object":
         disturbances = {"object_surface_friction": [round(max(0.15, 0.55 - difficulty * 0.35), 3), 0.9]}
-        evaluation["success_condition"] = "lift_without_object_slip"
-    elif kind == "heavy_object_pick":
-        robot_variation = {"gripper_force_scale": [0.8, 1.0]}
+        evaluation["success_condition"] = "h1_move_without_object_slip"
+    elif kind == "heavy_object_move":
+        robot_variation = {"arm_contact_force_scale": [0.8, 1.0], "balance_margin_scale": [0.9, 1.0]}
         disturbances = {"object_mass_scale": [1.0, round(1.2 + difficulty * 3.0, 2)]}
-        evaluation["success_condition"] = "lift_heavy_object_without_force_violation"
+        evaluation["success_condition"] = "h1_move_heavy_object_without_force_violation"
     elif kind == "narrow_bin_place":
-        task_graph = ["approach_target", "grasp_target", "lift_target", "place_inside_bin"]
-        evaluation["success_condition"] = "place_target_inside_bin"
+        task_graph = [
+            "balance_before_reach",
+            "approach_target",
+            "secure_target",
+            "move_target",
+            "place_inside_bin",
+        ]
+        evaluation["success_condition"] = "h1_place_target_inside_bin"
         evaluation["bin_clearance_m"] = round(max(0.015, 0.08 - difficulty * 0.06), 3)
     elif kind == "mixed_clutter_generalization":
-        task_graph = ["select_target", "avoid_clutter", "grasp_target", "lift_target", "place_at_goal"]
-        evaluation["success_condition"] = "pick_place_target_in_mixed_clutter"
+        task_graph = [
+            "balance_before_reach",
+            "select_target",
+            "avoid_clutter",
+            "secure_target",
+            "move_target",
+            "place_at_goal",
+        ]
+        evaluation["success_condition"] = "h1_move_and_place_target_in_mixed_clutter"
         disturbances = {
             "object_mass_scale": [0.8, round(1.0 + difficulty * 2.2, 2)],
             "object_surface_friction": [round(max(0.2, 0.65 - difficulty * 0.35), 3), 1.2],
@@ -171,11 +191,16 @@ def _make_scenario(
         scenario_id=scenario_id,
         parent_scenario_id=parent_scenario_id,
         task_family="manipulation",
+        robot_id="unitree_h1",
         difficulty=difficulty,
         workspace=workspace,
         objects=objects,
         task_graph=task_graph,
-        dataset={"dataset_id": "robogenesis_manipulation_primitives_v1", "asset_manifest": "assets/manipulation_objects/manifest.json"},
+        dataset={
+            "dataset_id": "robogenesis_h1_manipulation_primitives_v1",
+            "asset_manifest": "assets/manipulation_objects/manifest.json",
+            "robot_spec": "assets/h1_robot_spec.json",
+        },
         disturbances=disturbances,
         robot_variation=robot_variation,
         evaluation=evaluation,
@@ -185,6 +210,7 @@ def _make_scenario(
 def _workspace(difficulty: float) -> dict[str, Any]:
     return {
         "type": "tabletop",
+        "robot_id": "unitree_h1",
         "table_asset": "assets/manipulation_objects/usd/lab_table.usda",
         "bounds_m": [[0.25, -0.45, 0.0], [0.85, 0.45, 0.45]],
         "goal_region_m": {
@@ -205,7 +231,7 @@ def _objects_for_kind(kind: str, difficulty: float) -> list[dict[str, Any]]:
     }
     objects = [target]
     distractor_count = 0
-    if kind in {"cluttered_pick", "mixed_clutter_generalization"}:
+    if kind in {"cluttered_target_interaction", "mixed_clutter_generalization"}:
         distractor_count = max(2, int(2 + difficulty * 5))
     elif kind == "distractor_occlusion":
         distractor_count = max(1, int(1 + difficulty * 3))

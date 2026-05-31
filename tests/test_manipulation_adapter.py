@@ -13,6 +13,12 @@ def test_manipulation_adapter_exposes_task_surface() -> None:
     task = adapter.default_task_spec()
 
     assert task.task_family == "manipulation"
+    assert task.robot_id == "unitree_h1"
+    assert task.robot_spec == "assets/h1_robot_spec.json"
+    assert task.base_env == "RoboGenesis-H1-Tabletop-Manipulation-v0"
+    assert task.requires_custom_env
+    assert "Franka" not in task.base_env
+    assert "UR10" not in task.base_env
     assert "configs/manipulation/rewards.yaml" in adapter.allowed_patch_paths()
 
 
@@ -20,9 +26,12 @@ def test_manipulation_scenarios_include_3d_objects() -> None:
     scenarios = generate_manipulation_scenarios(ExperimentHistory())
 
     assert scenarios[0].task_family == "manipulation"
+    assert scenarios[0].robot_id == "unitree_h1"
     assert scenarios[0].objects
+    assert "gripper" not in " ".join(scenarios[0].task_graph)
     assert scenarios[0].workspace["table_asset"].endswith("lab_table.usda")
     assert scenarios[0].dataset["asset_manifest"] == "assets/manipulation_objects/manifest.json"
+    assert scenarios[0].dataset["robot_spec"] == "assets/h1_robot_spec.json"
 
 
 def test_manipulation_planner_patch_validates_and_reads_config() -> None:
@@ -45,7 +54,7 @@ def test_manipulation_score_and_failure_diagnosis() -> None:
         "policy_id": "manipulation_test",
         "task_success_rate": 0.4,
         "task_progress": 0.5,
-        "grasp_success_rate": 0.7,
+        "contact_success_rate": 0.7,
         "object_slip_rate": 0.5,
         "placement_error_m": 0.04,
         "collision_rate": 0.05,

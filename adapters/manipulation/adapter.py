@@ -1,9 +1,9 @@
-"""Manipulation task adapter.
+"""H1-only manipulation task adapter.
 
-This adapter makes tabletop pick/place a first-class task family without
-claiming the Phase-1 H1 locomotion runner can train it yet. It defines the
-bounded patch surface, scenario frontier, scoring, and failure taxonomy that a
-future Isaac Lab manipulation runner will consume.
+Isaac Lab 2.0.x ships stock manipulation tasks for fixed arms such as Franka
+and UR10, but not for Unitree H1. This adapter keeps the AutoResearch surface
+H1-first by targeting a custom H1 tabletop manipulation environment instead of
+silently falling back to a non-H1 robot.
 """
 
 from __future__ import annotations
@@ -16,6 +16,9 @@ from core.schemas import FailureReport, ScenarioSpec, ScoreBreakdown, TaskSpec
 
 class ManipulationAdapter:
     task_family = "manipulation"
+    robot_id = "unitree_h1"
+    robot_spec = "assets/h1_robot_spec.json"
+    base_env = "RoboGenesis-H1-Tabletop-Manipulation-v0"
 
     _allowed_patch_paths = [
         "configs/manipulation/rewards.yaml",
@@ -26,8 +29,8 @@ class ManipulationAdapter:
     ]
 
     failure_taxonomy = [
-        "missed_grasp",
-        "unstable_grasp",
+        "missed_contact",
+        "unstable_contact",
         "object_slip",
         "placement_miss",
         "collision_with_clutter",
@@ -42,19 +45,28 @@ class ManipulationAdapter:
 
     def default_task_spec(self) -> TaskSpec:
         return TaskSpec(
-            task_id="tabletop_pick_place_v1",
+            task_id="h1_tabletop_manipulation_v1",
             task_family="manipulation",
-            objective="pick a target object from a table and place it at a requested goal pose without collisions",
-            base_env="Isaac-Lift-Cube-Franka-v0",
+            objective=(
+                "Use Unitree H1 whole-body control and arm end effectors to reach, secure, "
+                "move, and place tabletop objects without falling or unsafe contact."
+            ),
+            base_env=self.base_env,
+            robot_id=self.robot_id,
+            robot_spec=self.robot_spec,
+            requires_custom_env=True,
             commands={
                 "target_object": "sampled_from_scenario",
                 "goal_pose": "sampled_from_scenario",
-                "success_condition": "lift_and_place_target",
+                "success_condition": "h1_reach_secure_move_and_place_target",
+                "allowed_stock_fallbacks": [],
             },
             style_targets={
+                "whole_body_balance": True,
+                "upright_torso": True,
                 "low_collision": True,
-                "stable_grasp": True,
-                "smooth_end_effector_motion": True,
+                "stable_end_effector_contact": True,
+                "smooth_arm_motion": True,
                 "minimal_object_slip": True,
             },
         )

@@ -1,5 +1,8 @@
 algorithm: ppo
 runner: rsl_rl
+robot_id: unitree_h1
+task: RoboGenesis-H1-Tabletop-Manipulation-v0
+requires_custom_env: true
 num_envs: 1024
 max_iterations: 1000
 learning_rate: 0.0003

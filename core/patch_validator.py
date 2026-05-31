@@ -190,8 +190,10 @@ def _range_error(key: str, value: Any) -> str | None:
         return _numeric_pair_range(key, value, 0.0, 0.25)
     if key == "domain_randomization.target_pose_noise_m":
         return _numeric_pair_range(key, value, 0.0, 0.2)
-    if key == "domain_randomization.gripper_force_scale":
+    if key == "domain_randomization.arm_contact_force_scale":
         return _numeric_pair_range(key, value, 0.3, 1.0)
+    if key == "domain_randomization.balance_margin_scale":
+        return _numeric_pair_range(key, value, 0.5, 1.0)
     if key in {"domain_randomization.lighting_jitter", "domain_randomization.camera_noise"}:
         return _numeric_range(key, value, 0.0, 1.0)
     if key == "domain_randomization.motor_strength_scale":

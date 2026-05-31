@@ -31,6 +31,9 @@ class TaskSpec:
     task_family: TaskFamily
     objective: str
     base_env: str
+    robot_id: str = "unitree_h1"
+    robot_spec: str = "assets/h1_robot_spec.json"
+    requires_custom_env: bool = False
     commands: dict[str, Any] = field(default_factory=dict)
     style_targets: dict[str, Any] = field(default_factory=dict)
 
@@ -43,6 +46,7 @@ class ScenarioSpec:
     scenario_id: str
     task_family: TaskFamily
     difficulty: float
+    robot_id: str = "unitree_h1"
     terrain: dict[str, Any] = field(default_factory=dict)
     workspace: dict[str, Any] = field(default_factory=dict)
     objects: list[dict[str, Any]] = field(default_factory=list)

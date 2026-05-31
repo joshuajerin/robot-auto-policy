@@ -13,7 +13,7 @@ def diagnose_manipulation_failure(rollouts: list[Rollout], metrics: dict[str, An
     causes: list[str] = []
     directions: list[str] = []
 
-    grasp = float(metrics.get("grasp_success_rate", metrics.get("grasp_stability", 1.0)))
+    contact = float(metrics.get("contact_success_rate", metrics.get("contact_stability", 1.0)))
     slip = float(metrics.get("object_slip_rate", 0.0))
     placement_error = float(metrics.get("placement_error_m", 0.0))
     collision = float(metrics.get("collision_rate", 0.0))
@@ -23,17 +23,17 @@ def diagnose_manipulation_failure(rollouts: list[Rollout], metrics: dict[str, An
     mass_success = float(metrics.get("mass_variation_success", 1.0))
     progress = float(metrics.get("task_progress", 1.0))
 
-    if grasp < 0.45:
-        primary = "missed_grasp"
-        causes.append("target approach or gripper closure reward is under-specified")
-        directions.extend(["increase grasp success reward", "slow early curriculum around target pose randomization"])
+    if contact < 0.45:
+        primary = "missed_contact"
+        causes.append("H1 arm approach or end-effector contact reward is under-specified")
+        directions.extend(["increase secure contact reward", "slow early curriculum around target pose randomization"])
     elif slip > 0.35:
         primary = "object_slip"
         causes.append("contact is not robust to friction or object geometry")
         directions.extend(["increase object stability reward", "widen object friction randomization"])
     elif placement_error > 0.07:
         primary = "placement_miss"
-        causes.append("goal pose precision is weak relative to lift reward")
+        causes.append("goal pose precision is weak relative to object-motion reward")
         directions.extend(["increase placement accuracy reward", "add staged place curriculum"])
     elif collision > 0.25:
         primary = "collision_with_clutter"
@@ -42,7 +42,7 @@ def diagnose_manipulation_failure(rollouts: list[Rollout], metrics: dict[str, An
     elif force > 0.15:
         primary = "excessive_force"
         causes.append("policy is using high-force contact to solve manipulation")
-        directions.extend(["increase force penalty", "constrain gripper force scale"])
+        directions.extend(["increase force penalty", "constrain H1 arm contact force scale"])
     elif occlusion_success < 0.5:
         primary = "fails_under_occlusion"
         causes.append("target visibility and occluder handling are not represented enough")
@@ -50,13 +50,13 @@ def diagnose_manipulation_failure(rollouts: list[Rollout], metrics: dict[str, An
     elif mass_success < 0.5:
         primary = "fails_with_mass_variation"
         causes.append("object mass randomization is outside the learned contact regime")
-        directions.extend(["smooth mass randomization curriculum", "increase stable lift reward"])
+        directions.extend(["smooth mass randomization curriculum", "increase stable object-motion reward"])
     elif timeout > 0.35 or progress < 0.45:
         primary = "timeout_no_progress"
         causes.append("policy is not making reliable task progress")
         directions.extend(["increase task progress reward", "simplify early object placement"])
     else:
-        primary = "unstable_grasp"
+        primary = "unstable_contact"
         causes.append("metrics do not isolate a single severe manipulation failure")
         directions.append("generate frontier manipulation scenarios and rerun diagnosis")
 
@@ -74,7 +74,7 @@ def diagnose_manipulation_failure(rollouts: list[Rollout], metrics: dict[str, An
         secondary_failures=secondary,
         evidence={
             "rollout_count": len(rollouts),
-            "grasp_success_rate": grasp,
+            "contact_success_rate": contact,
             "object_slip_rate": slip,
             "placement_error_m": placement_error,
             "collision_rate": collision,

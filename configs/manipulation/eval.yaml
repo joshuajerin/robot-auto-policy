@@ -1,11 +1,14 @@
+robot_id: unitree_h1
+task: RoboGenesis-H1-Tabletop-Manipulation-v0
+requires_custom_env: true
 fixed_eval_seeds: [101, 203, 307, 409, 503, 601, 709, 811]
 num_episodes_per_seed: 8
 max_steps_per_episode: 240
 metrics:
   - task_success_rate
   - task_progress
-  - grasp_success_rate
-  - grasp_stability
+  - contact_success_rate
+  - contact_stability
   - placement_accuracy
   - object_slip_rate
   - collision_rate

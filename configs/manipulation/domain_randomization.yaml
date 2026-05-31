@@ -6,4 +6,5 @@ domain_randomization:
   target_pose_noise_m: [0.0, 0.03]
   lighting_jitter: 0.15
   camera_noise: 0.02
-  gripper_force_scale: [0.8, 1.0]
+  arm_contact_force_scale: [0.8, 1.0]
+  balance_margin_scale: [0.9, 1.0]
