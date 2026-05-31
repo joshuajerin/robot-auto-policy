@@ -9,10 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from adapters.base import ExperimentHistory
-from adapters.locomotion import LocomotionAdapter
+from adapters.base import ExperimentHistory, TaskAdapter
+from adapters.registry import get_task_adapter
 from agents.openai_planner import propose_patch_with_openai
-from agents.planner import propose_locomotion_patch
+from agents.planner import propose_patch
 from agents.scenario_agent import generate_scenarios
 from core.autoresearch_loop import BASELINE_RAW_METRICS
 from core.experiment_db import ExperimentDB
@@ -26,6 +26,7 @@ from modal_runner.phase1 import build_phase1_spec
 class OrchestrationConfig:
     repo_root: Path
     db_path: Path
+    task_family: str = "locomotion"
     phase1_config: Path = Path("configs/locomotion/phase1_h1.yaml")
     output_dir: Path = Path("artifacts/autoresearch_specs")
     experiment_prefix: str = "autoresearch_h1"
@@ -83,7 +84,10 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
     output_dir = (repo_root / config.output_dir).resolve() if not config.output_dir.is_absolute() else config.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    adapter = LocomotionAdapter()
+    adapter = get_task_adapter(config.task_family)
+    if config.submit and adapter.task_family != "locomotion":
+        raise ValueError("Modal submission is currently wired only for locomotion Phase-1 jobs")
+
     db = ExperimentDB(config.db_path)
     try:
         best = _ensure_best_policy(db, adapter)
@@ -105,8 +109,9 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
             scenarios = generate_scenarios(adapter, history)
             db.insert_scenarios(scenarios)
 
-            modal_spec = _build_modal_spec(
+            modal_spec = _build_experiment_spec(
                 config,
+                adapter=adapter,
                 experiment_id=experiment_id,
                 seed=seed,
                 best=best,
@@ -202,45 +207,80 @@ def reconcile_modal_experiments(
         db.close()
 
 
-def _ensure_best_policy(db: ExperimentDB, adapter: LocomotionAdapter) -> ScoreBreakdown:
+BASELINE_MANIPULATION_RAW_METRICS: dict[str, Any] = {
+    "policy_id": "baseline_manipulation_0000",
+    "task_success_rate": 0.32,
+    "task_progress": 0.42,
+    "grasp_success_rate": 0.45,
+    "grasp_stability": 0.38,
+    "placement_accuracy": 0.28,
+    "generated_scenario_success": 0.10,
+    "energy_efficiency": 0.70,
+    "smoothness": 0.62,
+    "slip_recovery_success": 0.20,
+    "collision_rate": 0.18,
+    "force_violation_rate": 0.06,
+    "base_success": 0.32,
+    "eval_seed_count": 8,
+    "safety_passed": True,
+    "object_slip_rate": 0.30,
+    "placement_error_m": 0.09,
+}
+
+
+def _ensure_best_policy(db: ExperimentDB, adapter: TaskAdapter) -> ScoreBreakdown:
+    prefixes = _policy_prefixes(adapter)
     row = db.conn.execute(
-        """
+        f"""
         SELECT metrics_json
         FROM policies
         WHERE accepted = 1
+          AND ({' OR '.join('policy_id LIKE ?' for _ in prefixes)})
         ORDER BY score DESC, created_at DESC
         LIMIT 1
-        """
+        """,
+        tuple(prefixes),
     ).fetchone()
     if row is not None:
         return ScoreBreakdown(**json.loads(row["metrics_json"]))
 
-    baseline = adapter.score(BASELINE_RAW_METRICS)
+    raw_metrics = BASELINE_RAW_METRICS if adapter.task_family == "locomotion" else BASELINE_MANIPULATION_RAW_METRICS
+    baseline = adapter.score(raw_metrics)
     db.insert_policy(
         policy_id=baseline.policy_id,
         parent_policy_id=None,
-        checkpoint_path="artifacts/baseline_0000/checkpoint.pt",
+        checkpoint_path=f"artifacts/{baseline.policy_id}/checkpoint.pt",
         metrics=baseline,
         accepted=True,
     )
-    db.insert_failure_report("baseline", baseline.policy_id, adapter.diagnose([], BASELINE_RAW_METRICS))
+    db.insert_failure_report(f"{adapter.task_family}_baseline", baseline.policy_id, adapter.diagnose([], raw_metrics))
     return baseline
 
 
-def _planner_context(adapter: LocomotionAdapter, best: ScoreBreakdown, history: ExperimentHistory) -> dict[str, Any]:
+def _policy_prefixes(adapter: TaskAdapter) -> list[str]:
+    if adapter.task_family == "locomotion":
+        return ["baseline_0000", "autoresearch_h1%", "policy_%"]
+    return [f"baseline_{adapter.task_family}%", f"{adapter.task_family}_%"]
+
+
+def _planner_context(adapter: TaskAdapter, best: ScoreBreakdown, history: ExperimentHistory) -> dict[str, Any]:
     return {
         "task_spec": adapter.default_task_spec().to_dict(),
         "best_policy": best.to_dict(),
         "recent_experiments": history.recent_experiments,
         "scenario_matrix": history.scenario_matrix,
         "failure_reports": history.failure_reports,
-        "mode": "quick_modal_iteration",
+        "mode": "quick_modal_iteration" if adapter.task_family == "locomotion" else "adapter_research_planning",
         "constraints": {
             "one_patch_only": True,
             "locked_evaluator": True,
-            "locked_modal_runner": True,
+            "locked_modal_runner": adapter.task_family == "locomotion",
             "max_iterations": 10,
-            "primary_goal": "surface runner/training failures quickly before scaling compute",
+            "primary_goal": (
+                "surface runner/training failures quickly before scaling compute"
+                if adapter.task_family == "locomotion"
+                else "prepare bounded manipulation scenarios and training configs before runner integration"
+            ),
         },
     }
 
@@ -248,10 +288,44 @@ def _planner_context(adapter: LocomotionAdapter, best: ScoreBreakdown, history: 
 def _propose_patch(context: dict[str, Any], *, use_openai: bool) -> PatchSpec:
     if use_openai:
         return propose_patch_with_openai(context, use_fallback=True)
-    return propose_locomotion_patch(context)
+    return propose_patch(context)
 
 
-def _build_modal_spec(
+def _build_experiment_spec(
+    config: OrchestrationConfig,
+    *,
+    adapter: TaskAdapter,
+    experiment_id: str,
+    seed: int,
+    best: ScoreBreakdown,
+    patch: PatchSpec,
+    config_changes: dict[str, dict[str, Any]],
+    scenarios: list[ScenarioSpec],
+) -> dict[str, Any]:
+    if adapter.task_family != "locomotion":
+        return _build_adapter_research_spec(
+            config,
+            adapter=adapter,
+            experiment_id=experiment_id,
+            seed=seed,
+            best=best,
+            patch=patch,
+            config_changes=config_changes,
+            scenarios=scenarios,
+        )
+
+    return _build_locomotion_modal_spec(
+        config,
+        experiment_id=experiment_id,
+        seed=seed,
+        best=best,
+        patch=patch,
+        config_changes=config_changes,
+        scenarios=scenarios,
+    )
+
+
+def _build_locomotion_modal_spec(
     config: OrchestrationConfig,
     *,
     experiment_id: str,
@@ -293,6 +367,43 @@ def _build_modal_spec(
         },
     }
     return spec
+
+
+def _build_adapter_research_spec(
+    config: OrchestrationConfig,
+    *,
+    adapter: TaskAdapter,
+    experiment_id: str,
+    seed: int,
+    best: ScoreBreakdown,
+    patch: PatchSpec,
+    config_changes: dict[str, dict[str, Any]],
+    scenarios: list[ScenarioSpec],
+) -> dict[str, Any]:
+    return {
+        "experiment_id": experiment_id,
+        "task_family": adapter.task_family,
+        "task_spec": adapter.default_task_spec().to_dict(),
+        "runner": {
+            "status": "not_configured",
+            "reason": "No deployed training runner is wired for this adapter yet.",
+        },
+        "autoresearch": {
+            "parent_policy_id": best.policy_id,
+            "score_before": best.total_score,
+            "patch": patch.to_dict(),
+            "config_changes": config_changes,
+            "generated_scenarios": [scenario.to_dict() for scenario in scenarios],
+            "created_at": datetime.now(UTC).isoformat(),
+            "controller": "core.orchestration",
+            "seed": seed,
+            "next_runner_work": [
+                "map ScenarioSpec objects into an Isaac Lab scene builder",
+                "connect manipulation task config to Modal train/evaluate functions",
+                "lock manipulation evaluator before accepting policies",
+            ],
+        },
+    }
 
 
 def _apply_patch_to_modal_spec(spec: dict[str, Any], patch: PatchSpec) -> None:

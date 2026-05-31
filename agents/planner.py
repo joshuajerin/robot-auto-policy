@@ -11,7 +11,15 @@ import json
 from typing import Any
 
 from adapters.locomotion.adapter import LocomotionAdapter
+from adapters.manipulation.adapter import ManipulationAdapter
 from core.schemas import PatchSpec
+
+
+def propose_patch(context: dict[str, Any]) -> PatchSpec:
+    task_family = str((context.get("task_spec") or {}).get("task_family") or "locomotion")
+    if task_family == "manipulation":
+        return propose_manipulation_patch(context)
+    return propose_locomotion_patch(context)
 
 
 def propose_locomotion_patch(context: dict[str, Any]) -> PatchSpec:
@@ -118,6 +126,112 @@ def propose_locomotion_patch(context: dict[str, Any]) -> PatchSpec:
     )
 
 
+def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
+    adapter = ManipulationAdapter()
+    failure = _primary_failure(context)
+
+    if failure in {"missed_grasp", "unstable_grasp"}:
+        return PatchSpec(
+            experiment_name="improve_grasp_acquisition",
+            hypothesis="The policy is failing because target approach and stable closure are underweighted.",
+            allowed_files=[
+                "configs/manipulation/rewards.yaml",
+                "configs/manipulation/curriculum.yaml",
+            ],
+            patch={
+                "reward_weights.grasp_success": 1.0,
+                "reward_weights.contact_quality": 0.5,
+                "curriculum.target_pose_randomization_end_m": 0.12,
+            },
+            expected_effect="Higher grasp success with less early pose-randomization pressure.",
+            risk="May overfit to easy target poses and under-train placement.",
+            rollback="Restore grasp/contact weights and target pose randomization end value.",
+        )
+
+    if failure == "object_slip":
+        return PatchSpec(
+            experiment_name="stabilize_object_contact",
+            hypothesis="Objects slip because contact stability and friction randomization are too weak.",
+            allowed_files=[
+                "configs/manipulation/rewards.yaml",
+                "configs/manipulation/domain_randomization.yaml",
+            ],
+            patch={
+                "reward_weights.object_stability": 0.65,
+                "reward_weights.stable_lift": 0.85,
+                "domain_randomization.object_friction_range": [0.35, 1.25],
+            },
+            expected_effect="Lower object slip under friction variation.",
+            risk="May create overly slow or conservative lifting.",
+            rollback="Restore object stability, stable lift, and object friction range.",
+        )
+
+    if failure == "placement_miss":
+        return PatchSpec(
+            experiment_name="tighten_goal_placement",
+            hypothesis="Placement is failing because lift reward dominates goal-pose precision.",
+            allowed_files=[
+                "configs/manipulation/rewards.yaml",
+                "configs/manipulation/curriculum.yaml",
+            ],
+            patch={
+                "reward_weights.placement_accuracy": 1.0,
+                "curriculum.bin_clearance_end_m": 0.035,
+                "curriculum.target_pose_randomization_end_m": 0.16,
+            },
+            expected_effect="Higher placement accuracy without changing evaluator logic.",
+            risk="May slow task completion while the policy learns precise placement.",
+            rollback="Restore placement reward and placement curriculum values.",
+        )
+
+    if failure in {"collision_with_clutter", "fails_under_occlusion"}:
+        return PatchSpec(
+            experiment_name="add_clutter_and_occlusion_curriculum",
+            hypothesis="The policy collides or loses targets because clutter/occlusion are introduced too abruptly.",
+            allowed_files=[
+                "configs/manipulation/rewards.yaml",
+                "configs/manipulation/curriculum.yaml",
+            ],
+            patch={
+                "reward_weights.collision_penalty": 0.8,
+                "curriculum.clutter_density_end": 0.45,
+                "curriculum.occlusion_probability_end": 0.35,
+            },
+            expected_effect="Better target recovery and fewer clutter collisions.",
+            risk="May make early exploration too conservative.",
+            rollback="Restore collision penalty and clutter/occlusion curriculum.",
+        )
+
+    if failure in {"fails_with_mass_variation", "excessive_force"}:
+        return PatchSpec(
+            experiment_name="smooth_mass_and_force_curriculum",
+            hypothesis="The policy uses excessive force because mass variation is too abrupt.",
+            allowed_files=[
+                "configs/manipulation/rewards.yaml",
+                "configs/manipulation/domain_randomization.yaml",
+                "configs/manipulation/curriculum.yaml",
+            ],
+            patch={
+                "reward_weights.force_penalty": 0.45,
+                "domain_randomization.object_mass_scale": [0.8, 2.0],
+                "curriculum.object_mass_scale_end": 2.0,
+            },
+            expected_effect="Lower force violations with more stable heavy-object lifting.",
+            risk="May reduce success on the heaviest generated objects.",
+            rollback="Restore force penalty and object mass ranges.",
+        )
+
+    return PatchSpec(
+        experiment_name="increase_manipulation_task_completion",
+        hypothesis="No dominant manipulation failure is isolated, so improve base task completion first.",
+        allowed_files=adapter.allowed_patch_paths()[:1],
+        patch={"reward_weights.task_completion": 1.15},
+        expected_effect="Higher pick/place completion under fixed scenarios.",
+        risk="Could over-prioritize completion over contact quality.",
+        rollback="Restore task completion reward.",
+    )
+
+
 def _primary_failure(context: dict[str, Any]) -> str:
     reports = context.get("failure_reports") or []
     if not reports:
@@ -140,6 +254,14 @@ def _primary_failure(context: dict[str, Any]) -> str:
                 "fails_on_rough_terrain",
                 "torso_pitch_instability",
                 "excessive_energy",
+                "missed_grasp",
+                "unstable_grasp",
+                "object_slip",
+                "placement_miss",
+                "collision_with_clutter",
+                "fails_under_occlusion",
+                "fails_with_mass_variation",
+                "excessive_force",
             ]:
                 if token in report_json:
                     return token

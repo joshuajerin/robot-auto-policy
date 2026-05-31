@@ -18,6 +18,7 @@ from modal_runner.deployed import DEFAULT_APP_NAME
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default="artifacts/research.db")
+    parser.add_argument("--task-family", default="locomotion")
     parser.add_argument("--phase1-config", default="configs/locomotion/phase1_h1.yaml")
     parser.add_argument("--output-dir", default="artifacts/autoresearch_specs")
     parser.add_argument("--experiment-prefix", default="autoresearch_h1")
@@ -73,6 +74,7 @@ def main() -> None:
     config = OrchestrationConfig(
         repo_root=REPO_ROOT,
         db_path=Path(args.db),
+        task_family=args.task_family,
         phase1_config=Path(args.phase1_config),
         output_dir=Path(args.output_dir),
         experiment_prefix=args.experiment_prefix,

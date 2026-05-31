@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 TaskFamily = Literal["locomotion", "manipulation", "navigation", "aerial", "locomanipulation"]
 ScenarioStatus = Literal["candidate", "validated", "too_easy", "learning_frontier", "too_hard", "invalid"]
-ExperimentStatus = Literal["proposed", "running", "accepted", "rejected", "failed"]
+ExperimentStatus = Literal["proposed", "running", "completed", "accepted", "rejected", "failed"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,10 @@ class ScenarioSpec:
     task_family: TaskFamily
     difficulty: float
     terrain: dict[str, Any] = field(default_factory=dict)
+    workspace: dict[str, Any] = field(default_factory=dict)
+    objects: list[dict[str, Any]] = field(default_factory=list)
+    task_graph: list[str] = field(default_factory=list)
+    dataset: dict[str, Any] = field(default_factory=dict)
     disturbances: dict[str, Any] = field(default_factory=dict)
     robot_variation: dict[str, Any] = field(default_factory=dict)
     evaluation: dict[str, Any] = field(default_factory=dict)
@@ -116,4 +120,3 @@ class ExperimentResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-

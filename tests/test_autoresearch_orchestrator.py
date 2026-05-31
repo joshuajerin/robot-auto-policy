@@ -76,6 +76,26 @@ def test_orchestrator_records_deployed_submission(monkeypatch, tmp_path) -> None
     assert row == ("running", "fc-test-123")
 
 
+def test_orchestrator_prepares_manipulation_adapter_spec(tmp_path) -> None:
+    steps = run_orchestration(
+        OrchestrationConfig(
+            repo_root=Path.cwd(),
+            db_path=tmp_path / "manipulation.db",
+            output_dir=tmp_path / "specs",
+            task_family="manipulation",
+            experiment_prefix="manipulation_loop",
+            submit=False,
+        )
+    )
+
+    spec = json.loads(Path(steps[0].modal_spec_path).read_text())
+
+    assert steps[0].parent_policy_id == "baseline_manipulation_0000"
+    assert spec["task_family"] == "manipulation"
+    assert spec["runner"]["status"] == "not_configured"
+    assert spec["autoresearch"]["generated_scenarios"][0]["objects"]
+
+
 def test_reconcile_updates_completed_modal_experiment(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "research.db"
     db = ExperimentDB(db_path)
