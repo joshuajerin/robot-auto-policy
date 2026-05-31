@@ -1,0 +1,41 @@
+{
+  "asset_set_id": "robogenesis_manipulation_primitives_v1",
+  "description": "Lightweight USD primitives for tabletop manipulation scenario generation.",
+  "objects": [
+    {
+      "object_id": "target_cube",
+      "asset_path": "assets/manipulation_objects/usd/target_cube.usda",
+      "role": "target",
+      "scale_m": [0.055, 0.055, 0.055],
+      "mass_kg": 0.12
+    },
+    {
+      "object_id": "cylinder_can",
+      "asset_path": "assets/manipulation_objects/usd/cylinder_can.usda",
+      "role": "target_or_distractor",
+      "radius_m": 0.032,
+      "height_m": 0.09,
+      "mass_kg": 0.09
+    },
+    {
+      "object_id": "distractor_block",
+      "asset_path": "assets/manipulation_objects/usd/distractor_block.usda",
+      "role": "distractor_or_occluder",
+      "scale_m": [0.08, 0.04, 0.045],
+      "mass_kg": 0.14
+    },
+    {
+      "object_id": "narrow_bin",
+      "asset_path": "assets/manipulation_objects/usd/narrow_bin.usda",
+      "role": "receptacle",
+      "inner_size_m": [0.12, 0.12, 0.045],
+      "mass_kg": 0.4
+    },
+    {
+      "object_id": "lab_table",
+      "asset_path": "assets/manipulation_objects/usd/lab_table.usda",
+      "role": "workspace",
+      "size_m": [1.2, 0.8, 0.04]
+    }
+  ]
+}

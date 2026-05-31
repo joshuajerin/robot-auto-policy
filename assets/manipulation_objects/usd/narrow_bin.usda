@@ -1,0 +1,54 @@
+#usda 1.0
+(
+    defaultPrim = "NarrowBin"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "NarrowBin" (
+    customData = {
+        string object_id = "narrow_bin"
+        string role = "receptacle"
+    }
+)
+{
+    def Cube "floor"
+    {
+        double size = 1
+        float3[] extent = [(-0.07, -0.07, 0.0), (0.07, 0.07, 0.008)]
+        rel material:binding = </Materials/BinGreen>
+    }
+    def Cube "left_wall"
+    {
+        double size = 1
+        float3[] extent = [(-0.075, -0.075, 0.0), (-0.065, 0.075, 0.055)]
+        rel material:binding = </Materials/BinGreen>
+    }
+    def Cube "right_wall"
+    {
+        double size = 1
+        float3[] extent = [(0.065, -0.075, 0.0), (0.075, 0.075, 0.055)]
+        rel material:binding = </Materials/BinGreen>
+    }
+    def Cube "front_wall"
+    {
+        double size = 1
+        float3[] extent = [(-0.075, -0.075, 0.0), (0.075, -0.065, 0.055)]
+        rel material:binding = </Materials/BinGreen>
+    }
+    def Cube "back_wall"
+    {
+        double size = 1
+        float3[] extent = [(-0.075, 0.065, 0.0), (0.075, 0.075, 0.055)]
+        rel material:binding = </Materials/BinGreen>
+    }
+}
+
+def "Materials"
+{
+    def Material "BinGreen"
+    {
+        color3f inputs:diffuseColor = (0.1, 0.55, 0.30)
+        float inputs:roughness = 0.58
+    }
+}

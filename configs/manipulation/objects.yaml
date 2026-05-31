@@ -1,0 +1,12 @@
+asset_root: assets/manipulation_objects
+manifest: assets/manipulation_objects/manifest.json
+default_object_set:
+  - target_cube
+  - cylinder_can
+  - distractor_block
+  - narrow_bin
+ycb_import:
+  dataset_config: configs/datasets/ycb_core_subset.yaml
+  output_dir: artifacts/datasets/ycb_core_subset
+  enabled_for_training: false
+  note: "Use primitive USD assets for fast local tests; import YCB meshes when running full manipulation training."
