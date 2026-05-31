@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=907)
     parser.add_argument("--video-length", type=int, default=240)
     parser.add_argument("--views", default="front,side,diagonal")
+    parser.add_argument("--fixed-camera", action="store_true", default=False)
     parser.add_argument("--real-time", action="store_true", default=False)
     return parser.parse_args()
 
@@ -74,7 +75,7 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
             env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
             env_cfg.seed = args_cli.seed
             env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
-            env.unwrapped.sim.set_camera_view(eye=view_cfg["eye"], target=view_cfg["target"])
+            _set_camera(env.unwrapped, view_cfg, follow=not args_cli.fixed_camera)
             env = gym.wrappers.RecordVideo(
                 env,
                 video_folder=str(view_dir),
@@ -97,6 +98,7 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
 
             for step in range(args_cli.video_length):
                 start_time = time.time()
+                _set_camera(env.unwrapped, view_cfg, follow=not args_cli.fixed_camera)
                 with torch.inference_mode():
                     actions = policy(obs)
                     obs, rewards, dones, infos = env.step(actions)
@@ -165,6 +167,26 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
     }
     (output_dir / "multiview_diagnostics.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report
+
+
+def _set_camera(env: Any, view_cfg: dict[str, list[float]], *, follow: bool) -> None:
+    if not follow:
+        env.sim.set_camera_view(eye=view_cfg["eye"], target=view_cfg["target"])
+        return
+
+    target = _robot_target(env) or view_cfg["target"]
+    eye_offset = [float(eye) - float(center) for eye, center in zip(view_cfg["eye"], view_cfg["target"])]
+    eye = [float(target[index]) + eye_offset[index] for index in range(3)]
+    env.sim.set_camera_view(eye=eye, target=target)
+
+
+def _robot_target(env: Any) -> list[float] | None:
+    try:
+        robot = env.scene["robot"]
+        root_pos = robot.data.root_pos_w[0].detach().float().cpu().tolist()
+        return [float(root_pos[0]), float(root_pos[1]), float(root_pos[2])]
+    except Exception:
+        return None
 
 
 def _load_rsl_rl_agent_cfg(args_cli: argparse.Namespace) -> Any:
