@@ -6,7 +6,16 @@ end_effector:
   mode: h1_arm_contact
   left_link: left_elbow
   right_link: right_elbow
-  note: "Isaac Lab has no stock H1 manipulation task in this image; do not substitute Franka or UR10."
+  note: "Use H1 arm contact to push/transfer objects across a table; do not substitute Franka or UR10."
+tabletop_transfer:
+  table_center_m: [0.58, 0.0, 0.74]
+  table_size_m: [0.90, 0.78, 0.08]
+  target_object: target_cube
+  start_region: left_side
+  start_y_range_m: [-0.30, -0.20]
+  goal_region: right_side
+  goal_y_range_m: [0.20, 0.30]
+  success_tolerance_m: 0.085
 asset_root: assets/manipulation_objects
 manifest: assets/manipulation_objects/manifest.json
 default_object_set:

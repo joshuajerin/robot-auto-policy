@@ -48,8 +48,8 @@ class ManipulationAdapter:
             task_id="h1_tabletop_manipulation_v1",
             task_family="manipulation",
             objective=(
-                "Use Unitree H1 whole-body control and arm end effectors to reach, secure, "
-                "move, and place tabletop objects without falling or unsafe contact."
+                "Use Unitree H1 whole-body control and arm contact to move a tabletop object "
+                "from the robot's left side of the table to a right-side goal region without falling."
             ),
             base_env=self.base_env,
             robot_id=self.robot_id,
@@ -57,8 +57,9 @@ class ManipulationAdapter:
             requires_custom_env=True,
             commands={
                 "target_object": "sampled_from_scenario",
-                "goal_pose": "sampled_from_scenario",
-                "success_condition": "h1_reach_secure_move_and_place_target",
+                "start_region": "left_side_of_table",
+                "goal_pose": "right_side_of_table",
+                "success_condition": "h1_transfer_target_cube_left_to_right_on_table",
                 "allowed_stock_fallbacks": [],
             },
             style_targets={
