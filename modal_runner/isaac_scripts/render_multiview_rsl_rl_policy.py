@@ -1,4 +1,4 @@
-"""Render multiview Isaac Lab videos and rollout diagnostics for an rsl_rl policy."""
+"""Render up to two Isaac Lab review videos and rollout diagnostics."""
 
 from __future__ import annotations
 
@@ -18,6 +18,12 @@ DEFAULT_VIEWS: dict[str, dict[str, list[float]]] = {
     "diagonal": {"eye": [3.2, -3.2, 2.0], "target": [0.0, 0.0, 1.0]},
 }
 
+TABLETOP_VIEWS: dict[str, dict[str, list[float]]] = {
+    "front": {"eye": [2.15, 0.0, 1.25], "target": [0.56, 0.0, 0.86]},
+    "side": {"eye": [0.62, -2.05, 1.18], "target": [0.62, 0.0, 0.86]},
+    "diagonal": {"eye": [1.95, -1.65, 1.35], "target": [0.56, 0.0, 0.9]},
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -29,9 +35,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=907)
     parser.add_argument("--video-length", type=int, default=240)
-    parser.add_argument("--views", default="front,side,diagonal")
+    parser.add_argument("--views", default="side,diagonal")
+    parser.add_argument("--scenario-id", default="")
     parser.add_argument("--fixed-camera", action="store_true", default=False)
     parser.add_argument("--real-time", action="store_true", default=False)
+    parser.add_argument("--config-patch", default="")
     return parser.parse_args()
 
 
@@ -58,24 +66,32 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
     from isaaclab_tasks.utils import parse_env_cfg
     from rsl_rl.runners import OnPolicyRunner
 
+    _register_robogenesis_tasks()
     output_dir = Path(args_cli.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     selected_views = [name.strip() for name in args_cli.views.split(",") if name.strip()]
-    unknown = [name for name in selected_views if name not in DEFAULT_VIEWS]
+    view_presets = _view_presets_for_task(args_cli.task)
+    unknown = [name for name in selected_views if name not in view_presets]
     if unknown:
-        raise ValueError(f"Unknown view names: {unknown}. Available: {sorted(DEFAULT_VIEWS)}")
+        raise ValueError(f"Unknown view names: {unknown}. Available: {sorted(view_presets)}")
 
     view_reports: list[dict[str, Any]] = []
     for index, view_name in enumerate(selected_views):
         env = None
         view_dir = output_dir / view_name
         view_dir.mkdir(parents=True, exist_ok=True)
-        view_cfg = DEFAULT_VIEWS[view_name]
+        view_cfg = view_presets[view_name]
         try:
             env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
             env_cfg.seed = args_cli.seed
+            agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
+            if args_cli.config_patch:
+                from train_rsl_rl_policy import _load_patch_values, apply_training_patch
+
+                apply_training_patch(env_cfg, agent_cfg, _load_patch_values(args_cli.config_patch))
             env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
-            _set_camera(env.unwrapped, view_cfg, follow=not args_cli.fixed_camera)
+            follow_camera = not args_cli.fixed_camera and not args_cli.task.startswith("RoboGenesis-H1-Tabletop")
+            _set_camera(env.unwrapped, view_cfg, follow=follow_camera)
             env = gym.wrappers.RecordVideo(
                 env,
                 video_folder=str(view_dir),
@@ -86,19 +102,23 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
             )
             env = RslRlVecEnvWrapper(env)
 
-            agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
             runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
             runner.load(args_cli.checkpoint)
             policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-            diagnostics = RolloutDiagnostics(policy_id=args_cli.policy_id, view_name=view_name, seed=args_cli.seed)
+            diagnostics = RolloutDiagnostics(
+                policy_id=args_cli.policy_id,
+                view_name=view_name,
+                seed=args_cli.seed,
+                scenario_id=args_cli.scenario_id,
+            )
             obs, _ = env.get_observations()
             dt = float(env.unwrapped.physics_dt)
             previous_actions = None
 
             for step in range(args_cli.video_length):
                 start_time = time.time()
-                _set_camera(env.unwrapped, view_cfg, follow=not args_cli.fixed_camera)
+                _set_camera(env.unwrapped, view_cfg, follow=follow_camera)
                 with torch.inference_mode():
                     actions = policy(obs)
                     obs, rewards, dones, infos = env.step(actions)
@@ -142,6 +162,7 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
         "policy_id": args_cli.policy_id,
         "task": args_cli.task,
         "checkpoint": args_cli.checkpoint,
+        "scenario_id": args_cli.scenario_id or None,
         "seed": args_cli.seed,
         "video_length": args_cli.video_length,
         "views": view_reports,
@@ -160,8 +181,8 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
                 "oscillatory_actions",
             ],
             "planner_hint": (
-                "Use front/side/diagonal videos plus rollout diagnostics to propose one bounded "
-                "reward, curriculum, actuator, or domain-randomization patch."
+                "Use these limited review videos plus rollout diagnostics to propose one bounded "
+                "scenario, reward, curriculum, actuator, or domain-randomization patch."
             ),
         },
     }
@@ -178,6 +199,12 @@ def _set_camera(env: Any, view_cfg: dict[str, list[float]], *, follow: bool) -> 
     eye_offset = [float(eye) - float(center) for eye, center in zip(view_cfg["eye"], view_cfg["target"])]
     eye = [float(target[index]) + eye_offset[index] for index in range(3)]
     env.sim.set_camera_view(eye=eye, target=target)
+
+
+def _view_presets_for_task(task_name: str) -> dict[str, dict[str, list[float]]]:
+    if task_name.startswith("RoboGenesis-H1-Tabletop"):
+        return TABLETOP_VIEWS
+    return DEFAULT_VIEWS
 
 
 def _robot_target(env: Any) -> list[float] | None:
@@ -210,11 +237,19 @@ def _load_rsl_rl_agent_cfg(args_cli: argparse.Namespace) -> Any:
     return cli_args.parse_rsl_rl_cfg(args_cli.task, cfg_args)
 
 
+def _register_robogenesis_tasks() -> None:
+    try:
+        import robogenesis_tasks  # noqa: F401
+    except Exception:
+        return
+
+
 class RolloutDiagnostics:
-    def __init__(self, *, policy_id: str, view_name: str, seed: int):
+    def __init__(self, *, policy_id: str, view_name: str, seed: int, scenario_id: str = ""):
         self.policy_id = policy_id
         self.view_name = view_name
         self.seed = seed
+        self.scenario_id = scenario_id
         self.frames: list[dict[str, Any]] = []
         self.rewards: list[float] = []
         self.command_errors: list[float] = []
@@ -287,6 +322,7 @@ class RolloutDiagnostics:
     def to_report(self) -> dict[str, Any]:
         return {
             "view": self.view_name,
+            "scenario_id": self.scenario_id or None,
             "policy_id": self.policy_id,
             "seed": self.seed,
             "frame_count": len(self.frames),
