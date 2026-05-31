@@ -116,7 +116,7 @@ def main() -> None:
     )
     docker_script = f"""
 set -euo pipefail
-sudo docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --device /dev/dri \\
+sudo docker run --rm -i --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --device /dev/dri \\
   -v {quote(remote_logs)}:/workspace/isaaclab/logs \\
   -v {quote(remote_scripts)}:/robogenesis/isaac_scripts \\
   -v {quote(remote_artifacts)}:/artifacts \\
