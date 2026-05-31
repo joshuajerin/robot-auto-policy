@@ -1,0 +1,4 @@
+commands:
+  linear_velocity_x: [0.4, 1.2]
+  linear_velocity_y: [0.0, 0.0]
+  yaw_velocity: [-0.2, 0.2]

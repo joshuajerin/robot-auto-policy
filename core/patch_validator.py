@@ -18,6 +18,7 @@ ALLOWED_PATCH_PATHS = {
     "configs/locomotion/actuators.yaml",
     "configs/locomotion/ppo.yaml",
     "configs/locomotion/terrain.yaml",
+    "configs/locomotion/commands.yaml",
     "configs/manipulation/rewards.yaml",
     "configs/manipulation/curriculum.yaml",
     "configs/manipulation/domain_randomization.yaml",
@@ -34,6 +35,7 @@ PATCH_ROOT_TO_FILE = {
     "actuators": "configs/locomotion/actuators.yaml",
     "ppo": "configs/locomotion/ppo.yaml",
     "terrain": "configs/locomotion/terrain.yaml",
+    "commands": "configs/locomotion/commands.yaml",
 }
 
 PATCH_ROOT_TO_FILES = {
@@ -46,6 +48,7 @@ PATCH_ROOT_TO_FILES = {
     "actuators": ["configs/locomotion/actuators.yaml"],
     "ppo": ["configs/locomotion/ppo.yaml", "configs/manipulation/ppo.yaml"],
     "terrain": ["configs/locomotion/terrain.yaml"],
+    "commands": ["configs/locomotion/commands.yaml"],
     "objects": ["configs/manipulation/objects.yaml"],
 }
 
@@ -141,7 +144,7 @@ def _validate_patch_key_value(key: str, value: Any, requested_files: set[str]) -
     if not _is_safe_scalar_or_list(value):
         errors.append(f"patch value for {key} must be a scalar or scalar list")
 
-    range_error = _range_error(key, value)
+    range_error = _range_error(key, value, target_file)
     if range_error:
         errors.append(range_error)
     return errors
@@ -155,8 +158,10 @@ def _is_safe_scalar_or_list(value: Any) -> bool:
     return False
 
 
-def _range_error(key: str, value: Any) -> str | None:
+def _range_error(key: str, value: Any, target_file: str) -> str | None:
     if key.startswith("reward_weights."):
+        if target_file == "configs/manipulation/rewards.yaml":
+            return _numeric_range(key, value, 0.0, 12.0)
         return _numeric_range(key, value, 0.0, 2.0)
     if key.startswith("curriculum.roughness_"):
         return _numeric_range(key, value, 0.0, 0.25)
@@ -225,6 +230,10 @@ def _range_error(key: str, value: Any) -> str | None:
         return None if isinstance(value, bool) else f"{key} must be boolean"
     if key == "terrain.type":
         return None if value in {"flat", "rough", "stairs", "stepping_stones", "mixed"} else f"{key} has invalid terrain type"
+    if key in {"commands.linear_velocity_x", "commands.linear_velocity_y"}:
+        return _numeric_pair_range(key, value, -3.0, 3.0)
+    if key == "commands.yaw_velocity":
+        return _numeric_pair_range(key, value, -2.0, 2.0)
     if key == "objects.enabled_for_training":
         return None if isinstance(value, bool) else f"{key} must be boolean"
     return f"unsupported patch parameter: {key}"

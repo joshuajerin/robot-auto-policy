@@ -49,6 +49,17 @@ def test_manipulation_planner_patch_validates_and_reads_config() -> None:
     assert changes["configs/manipulation/rewards.yaml"]["reward_weights.object_stability"]["old"] == 0.45
 
 
+def test_manipulation_default_planner_does_not_downweight_h1_transfer_rewards() -> None:
+    context = {"task_spec": ManipulationAdapter().default_task_spec().to_dict(), "failure_reports": []}
+
+    patch = propose_patch(context)
+
+    assert patch.experiment_name == "bootstrap_h1_tabletop_transfer_rewards"
+    assert patch.patch["reward_weights.task_completion"] >= 8.0
+    assert patch.patch["reward_weights.stable_object_motion"] >= 2.4
+    assert patch.patch["reward_weights.placement_accuracy"] >= 1.8
+
+
 def test_manipulation_score_and_failure_diagnosis() -> None:
     metrics = {
         "policy_id": "manipulation_test",

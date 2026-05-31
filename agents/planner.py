@@ -139,8 +139,9 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
                 "configs/manipulation/curriculum.yaml",
             ],
             patch={
-                "reward_weights.secure_contact": 1.0,
-                "reward_weights.contact_quality": 0.5,
+                "reward_weights.secure_contact": 1.35,
+                "reward_weights.contact_quality": 1.1,
+                "reward_weights.stable_object_motion": 3.0,
                 "curriculum.target_pose_randomization_end_m": 0.12,
             },
             expected_effect="Higher H1 contact success with less early pose-randomization pressure.",
@@ -158,8 +159,8 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
             ],
             patch={
                 "reward_weights.object_stability": 0.65,
-                "reward_weights.stable_object_motion": 0.85,
-                "domain_randomization.object_friction_range": [0.35, 1.25],
+                "reward_weights.stable_object_motion": 3.0,
+                "domain_randomization.object_friction_range": [0.75, 1.25],
             },
             expected_effect="Lower object slip under friction variation.",
             risk="May create overly slow or conservative object motion.",
@@ -175,7 +176,9 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
                 "configs/manipulation/curriculum.yaml",
             ],
             patch={
-                "reward_weights.placement_accuracy": 1.0,
+                "reward_weights.task_completion": 10.0,
+                "reward_weights.stable_object_motion": 3.2,
+                "reward_weights.placement_accuracy": 3.5,
                 "curriculum.bin_clearance_end_m": 0.035,
                 "curriculum.target_pose_randomization_end_m": 0.16,
             },
@@ -223,13 +226,26 @@ def propose_manipulation_patch(context: dict[str, Any]) -> PatchSpec:
         )
 
     return PatchSpec(
-        experiment_name="increase_manipulation_task_completion",
-        hypothesis="No dominant manipulation failure is isolated, so improve base task completion first.",
-        allowed_files=adapter.allowed_patch_paths()[:1],
-        patch={"reward_weights.task_completion": 1.15},
-        expected_effect="Higher H1 object-interaction completion under fixed scenarios.",
-        risk="Could over-prioritize completion over contact quality.",
-        rollback="Restore task completion reward.",
+        experiment_name="bootstrap_h1_tabletop_transfer_rewards",
+        hypothesis=(
+            "The H1 policy is staying balanced but not moving the cube far enough, so the next experiment "
+            "should reward contact, y-direction object progress, and final placement more strongly."
+        ),
+        allowed_files=[
+            "configs/manipulation/rewards.yaml",
+            "configs/manipulation/curriculum.yaml",
+        ],
+        patch={
+            "reward_weights.task_completion": 10.0,
+            "reward_weights.secure_contact": 1.25,
+            "reward_weights.contact_quality": 1.05,
+            "reward_weights.stable_object_motion": 3.2,
+            "reward_weights.placement_accuracy": 3.5,
+            "curriculum.target_pose_randomization_end_m": 0.10,
+        },
+        expected_effect="More cube motion toward the right-side goal while preserving H1 balance and table contact.",
+        risk="May overfit to the single tabletop transfer before generated object scenarios are introduced.",
+        rollback="Restore task completion, contact, object-motion, placement, and target-pose curriculum values.",
     )
 
 
