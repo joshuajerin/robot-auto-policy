@@ -42,6 +42,8 @@ DEFAULT_ROUGH_TASK = "Isaac-Velocity-Rough-H1-v0"
 class MultiviewAutoResearchResult:
     experiment_ids: list[str]
     parent_policy_id: str
+    resume_from_experiment_id: str | None
+    resume_checkpoint: str | None
     patch: dict[str, Any]
     failure_report: dict[str, Any]
     scenario_ids: list[str]
@@ -71,10 +73,33 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int, default=400)
     parser.add_argument("--video-length", type=int, default=240)
     parser.add_argument(
+        "--scenario-batch",
+        action="store_true",
+        help="Submit one focused Modal run per generated scenario instead of one generic run.",
+    )
+    parser.add_argument("--scenario-limit", type=int, default=4)
+    parser.add_argument(
         "--train-task",
         default="auto",
         help="Isaac Lab task for the next run. Use 'auto', 'flat', 'rough', or an explicit task id.",
     )
+    parser.add_argument(
+        "--locomotion-mode",
+        choices=("walking", "running"),
+        default="walking",
+        help="Condition command ranges and rewards for walking or running locomotion.",
+    )
+    parser.add_argument(
+        "--resume-parent",
+        action="store_true",
+        help="Resume PPO from the inferred parent policy experiment instead of starting from scratch.",
+    )
+    parser.add_argument(
+        "--resume-from-experiment",
+        default="",
+        help="Explicit parent experiment id to restore before launching the next Modal run.",
+    )
+    parser.add_argument("--resume-checkpoint", default="latest")
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
     parser.add_argument("--env", default="")
@@ -89,6 +114,12 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
     multiview_data = json.loads(multiview_path.read_text())
     multiview_summary = _summarize_multiview(multiview_data, multiview_path)
     parent_policy_id = args.parent_policy_id or _infer_parent_policy_id(multiview_summary, multiview_path)
+    resume_from_experiment_id = (
+        _safe_name(args.resume_from_experiment)
+        if args.resume_from_experiment
+        else (_safe_name(parent_policy_id) if args.resume_parent and parent_policy_id else "")
+    )
+    resume_checkpoint = str(args.resume_checkpoint or "latest")
 
     raw_metrics_path = _resolve_raw_metrics(args.raw_metrics, parent_policy_id, multiview_path)
     score_before = _score_before(raw_metrics_path)
@@ -99,10 +130,13 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
         max_iterations=args.max_iterations,
         num_envs=args.num_envs,
     )
+    patch = _condition_patch_for_locomotion_mode(patch, args.locomotion_mode)
     validate_patch_spec(patch).raise_for_errors()
     config_changes = apply_yaml_patch(patch, repo_root=REPO_ROOT, dry_run=True)
 
     scenarios = _generate_scenarios(failure_report)
+    if args.scenario_limit > 0:
+        scenarios = scenarios[: args.scenario_limit]
     train_task = _select_train_task(args.train_task, patch, scenarios)
     output_dir = (REPO_ROOT / args.output_dir).resolve() if not Path(args.output_dir).is_absolute() else Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +148,10 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
         "multiview_input_path": str(multiview_path),
         "raw_metrics_path": str(raw_metrics_path) if raw_metrics_path else None,
         "score_before": score_before,
+        "resume_from_experiment_id": resume_from_experiment_id or None,
+        "resume_checkpoint": resume_checkpoint if resume_from_experiment_id else None,
+        "locomotion_mode": args.locomotion_mode,
+        "scenario_training_mode": "focused_batch" if args.scenario_batch else "single_patch",
         "multiview": multiview_summary,
         "failure_report": failure_report.to_dict(),
         "patch": patch.to_dict(),
@@ -138,9 +176,15 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
     specs: list[dict[str, Any]] = []
     spec_paths: list[str] = []
     experiment_ids: list[str] = []
-    for index in range(max(1, args.num_runs)):
+    for index, active_scenario in enumerate(_scenario_run_plan(args, scenarios)):
         seed = args.seed_start + index
-        experiment_id = f"{safe_prefix}_{timestamp}_seed-{seed}"
+        spec_patch = _patch_for_scenario(patch, active_scenario)
+        validate_patch_spec(spec_patch).raise_for_errors()
+        spec_config_changes = apply_yaml_patch(spec_patch, repo_root=REPO_ROOT, dry_run=True)
+        spec_scenarios = [active_scenario] if active_scenario is not None else scenarios
+        spec_train_task = _select_train_task(args.train_task, spec_patch, spec_scenarios)
+        scenario_suffix = f"{_safe_name(active_scenario.scenario_id)}_" if active_scenario is not None else ""
+        experiment_id = f"{safe_prefix}_{timestamp}_{scenario_suffix}seed-{seed}"
         spec = _build_modal_spec(
             phase1_config=Path(args.phase1_config),
             experiment_id=experiment_id,
@@ -148,14 +192,17 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
             num_envs=args.num_envs,
             max_iterations=args.max_iterations,
             video_length=args.video_length,
-            train_task=train_task,
+            train_task=spec_train_task,
             parent_policy_id=parent_policy_id,
             score_before=score_before,
-            patch=patch,
-            config_changes=config_changes,
-            scenarios=scenarios,
+            patch=spec_patch,
+            config_changes=spec_config_changes,
+            scenarios=spec_scenarios,
             multiview_summary=multiview_summary,
             context_path=context_path,
+            resume_from_experiment_id=resume_from_experiment_id,
+            resume_checkpoint=resume_checkpoint,
+            locomotion_mode=args.locomotion_mode,
         )
         spec_path = output_dir / f"{experiment_id}.json"
         _write_json(spec_path, spec)
@@ -184,6 +231,8 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
     return MultiviewAutoResearchResult(
         experiment_ids=experiment_ids,
         parent_policy_id=parent_policy_id,
+        resume_from_experiment_id=resume_from_experiment_id or None,
+        resume_checkpoint=resume_checkpoint if resume_from_experiment_id else None,
         patch=patch.to_dict(),
         failure_report=failure_report.to_dict(),
         scenario_ids=[scenario.scenario_id for scenario in scenarios],
@@ -487,13 +536,10 @@ def _propose_multiview_patch(
                 "domain_randomization.motor_strength_scale": [0.85, 1.12],
                 "domain_randomization.action_delay_steps": [0, 2],
                 "domain_randomization.push_impulse_probability": 0.05,
-                "domain_randomization.push_force_range_n": [20, 90],
                 "curriculum.roughness_start": 0.01,
                 "curriculum.roughness_end": 0.07,
                 "curriculum.push_probability_end": 0.06,
                 "terrain.type": "rough",
-                "terrain.height_noise_m": 0.04,
-                "terrain.slope_range_deg": [-6.0, 6.0],
                 "terrain.rough_heightfield_enabled": True,
                 "ppo.max_iterations": max_iterations,
                 "ppo.num_envs": num_envs,
@@ -527,6 +573,37 @@ def _generate_scenarios(failure_report: FailureReport) -> list[ScenarioSpec]:
         ]
     )
     return adapter.generate_scenarios(history)
+
+
+def _condition_patch_for_locomotion_mode(patch: PatchSpec, locomotion_mode: str) -> PatchSpec:
+    if locomotion_mode != "running":
+        return patch
+    allowed_files = list(dict.fromkeys([*patch.allowed_files, "configs/locomotion/commands.yaml"]))
+    running_patch = {
+        **patch.patch,
+        "commands.linear_velocity_x": [1.4, 2.6],
+        "commands.linear_velocity_y": [-0.15, 0.15],
+        "commands.yaw_velocity": [-0.35, 0.35],
+        "curriculum.command_velocity_end": 2.6,
+        "reward_weights.command_tracking": max(float(patch.patch.get("reward_weights.command_tracking", 1.0)), 1.2),
+        "reward_weights.smoothness": max(float(patch.patch.get("reward_weights.smoothness", 0.1)), 0.18),
+        "reward_weights.energy_penalty": max(float(patch.patch.get("reward_weights.energy_penalty", 0.05)), 0.08),
+    }
+    return PatchSpec(
+        experiment_name=f"{patch.experiment_name}_running",
+        hypothesis=(
+            patch.hypothesis
+            + " The locomotion objective is changed from walking to running, so commanded forward speed is raised and command tracking is strengthened."
+        ),
+        allowed_files=allowed_files,
+        patch=running_patch,
+        expected_effect=(
+            patch.expected_effect
+            + " The policy should sustain higher forward velocity without falling or producing excessive action jerk."
+        ),
+        risk=patch.risk + " Running commands can expose flight-phase instability, knee collapse, or energy spikes.",
+        rollback=patch.rollback,
+    )
 
 
 def _actuator_patch_for_motor_diagnostics(motor_diagnostics: dict[str, Any]) -> dict[str, Any]:
@@ -585,6 +662,9 @@ def _build_modal_spec(
     scenarios: list[ScenarioSpec],
     multiview_summary: dict[str, Any],
     context_path: Path,
+    resume_from_experiment_id: str = "",
+    resume_checkpoint: str = "latest",
+    locomotion_mode: str = "walking",
 ) -> dict[str, Any]:
     config_path = (REPO_ROOT / phase1_config).resolve() if not phase1_config.is_absolute() else phase1_config
     overrides = SimpleNamespace(
@@ -600,10 +680,18 @@ def _build_modal_spec(
     )
     spec = build_phase1_spec(config_path, experiment_id, overrides)
     _project_patch_to_modal_spec(spec, patch)
+    spec.setdefault("train", {})["use_patched_runner"] = True
+    if resume_from_experiment_id:
+        train = spec.setdefault("train", {})
+        train["resume_from_experiment_id"] = resume_from_experiment_id
+        train["resume_checkpoint"] = resume_checkpoint
     spec["autoresearch"] = {
         "controller": "tools.autoresearch_from_multiview",
         "created_at": datetime.now(UTC).isoformat(),
         "parent_policy_id": parent_policy_id,
+        "resume_from_experiment_id": resume_from_experiment_id or None,
+        "resume_checkpoint": resume_checkpoint if resume_from_experiment_id else None,
+        "locomotion_mode": locomotion_mode,
         "score_before": score_before,
         "patch": patch.to_dict(),
         "config_changes": config_changes,
@@ -616,6 +704,10 @@ def _build_modal_spec(
                 "ppo.max_iterations": spec.get("train", {}).get("max_iterations"),
                 "ppo.num_envs": spec.get("train", {}).get("num_envs"),
                 "seed": spec.get("train", {}).get("seed"),
+                "resume_from_experiment_id": resume_from_experiment_id or None,
+                "resume_checkpoint": resume_checkpoint if resume_from_experiment_id else None,
+                "use_patched_runner": True,
+                "active_scenario_ids": [scenario.scenario_id for scenario in scenarios],
             },
             "research_directives": {
                 "reward_keys": sorted(key for key in patch.patch if key.startswith("reward_weights.")),
@@ -649,6 +741,84 @@ def _project_patch_to_modal_spec(spec: dict[str, Any], patch: PatchSpec) -> None
             ppo_overrides[key.removeprefix("ppo.")] = value
     if ppo_overrides:
         train["ppo_overrides"] = ppo_overrides
+
+
+def _scenario_run_plan(args: argparse.Namespace, scenarios: list[ScenarioSpec]) -> list[ScenarioSpec | None]:
+    if args.scenario_batch and scenarios:
+        return [scenario for _ in range(max(1, args.num_runs)) for scenario in scenarios]
+    return [None for _ in range(max(1, args.num_runs))]
+
+
+def _patch_for_scenario(patch: PatchSpec, scenario: ScenarioSpec | None) -> PatchSpec:
+    if scenario is None:
+        return patch
+    scenario_patch = _scenario_to_training_patch(scenario)
+    if not scenario_patch:
+        return patch
+    allowed_files = list(
+        dict.fromkeys(
+            [
+                *patch.allowed_files,
+                "configs/locomotion/domain_randomization.yaml",
+                "configs/locomotion/terrain.yaml",
+            ]
+        )
+    )
+    base_patch = _strip_environment_patch(patch.patch)
+    return PatchSpec(
+        experiment_name=f"{patch.experiment_name}_{scenario.scenario_id}",
+        hypothesis=(
+            patch.hypothesis
+            + f" This focused run applies the generated scenario {scenario.scenario_id} as the active training environment."
+        ),
+        allowed_files=allowed_files,
+        patch={**base_patch, **scenario_patch},
+        expected_effect=(
+            patch.expected_effect
+            + f" The policy should improve specifically on {scenario.scenario_id} without losing the fixed evaluator."
+        ),
+        risk=patch.risk + " Scenario-focused training can overfit if accepted without regression checks.",
+        rollback=patch.rollback,
+    )
+
+
+def _scenario_to_training_patch(scenario: ScenarioSpec) -> dict[str, Any]:
+    patch: dict[str, Any] = {}
+    terrain = scenario.terrain or {}
+    disturbances = scenario.disturbances or {}
+    robot_variation = scenario.robot_variation or {}
+
+    terrain_type = terrain.get("type")
+    if terrain_type:
+        patch["terrain.type"] = "rough" if terrain_type == "slope" else terrain_type
+        if terrain_type in {"rough", "slope"}:
+            patch["terrain.rough_heightfield_enabled"] = True
+        elif terrain_type == "flat":
+            patch["terrain.rough_heightfield_enabled"] = False
+            patch["terrain.height_noise_m"] = 0.0
+            patch["terrain.slope_range_deg"] = [0.0, 0.0]
+    if "height_noise_m" in terrain:
+        patch["terrain.height_noise_m"] = terrain["height_noise_m"]
+    if "slope_range_deg" in terrain:
+        patch["terrain.slope_range_deg"] = terrain["slope_range_deg"]
+    if "friction_range" in terrain:
+        patch["domain_randomization.friction_range"] = terrain["friction_range"]
+
+    for key in ("push_force_range_n", "push_impulse_probability"):
+        if key in disturbances:
+            patch[f"domain_randomization.{key}"] = disturbances[key]
+    for key in ("motor_strength_scale", "action_delay_steps", "payload_mass_kg"):
+        if key in robot_variation:
+            patch[f"domain_randomization.{key}"] = robot_variation[key]
+    return patch
+
+
+def _strip_environment_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in patch.items()
+        if not (key.startswith("terrain.") or key.startswith("domain_randomization."))
+    }
 
 
 def _record_research_memory(

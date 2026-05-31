@@ -11,6 +11,7 @@ from typing import Any
 
 from core.artifact_ingest import ingest_artifact_dir
 from core.experiment_db import ExperimentDB
+from core.raindrop_trace import publish_artifact_run
 from core.scoring import should_accept, score_from_metrics
 from core.schemas import ScoreBreakdown
 
@@ -24,6 +25,7 @@ class ArtifactSyncResult:
     accepted: bool
     review_reasons: list[str]
     ingest_summary: dict[str, Any] | None
+    raindrop_summary: dict[str, Any] | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -124,6 +126,13 @@ def sync_and_ingest_modal_experiment(
         modal_job_id=existing.get("modal_job_id"),
         score_before=score_before,
     )
+    raindrop_summary = publish_artifact_run(
+        artifact_dir,
+        ingest_summary=summary,
+        accepted=accepted,
+        review_reasons=review_reasons,
+        db_path=db_path,
+    )
     return ArtifactSyncResult(
         experiment_id=experiment_id,
         artifact_dir=str(artifact_dir),
@@ -132,6 +141,7 @@ def sync_and_ingest_modal_experiment(
         accepted=accepted,
         review_reasons=review_reasons,
         ingest_summary=summary,
+        raindrop_summary=raindrop_summary,
     )
 
 

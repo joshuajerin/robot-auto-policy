@@ -257,12 +257,29 @@ rollout_trace.json
 rollout_telemetry.mp4
 rollout_videos.json
 artifact_manifest.json
+raindrop_trace.json
 checkpoint artifacts under logs/
 ```
 
 Use `python tools/modal_artifact_status.py --experiment <experiment_id>` to
 confirm each run has metrics, a checkpoint, the rollout action trace, and at
 least one rollout video before reviewing or ingesting it.
+
+Use `python tools/autoresearch_orchestrator.py --sync-artifacts --experiment-id
+<experiment_id>` after completion to download the Modal artifacts, ingest the
+run into SQLite, and publish the train/eval/render task timeline plus rollout
+video links into Raindrop Workshop. Run `python tools/replay_server.py` while
+viewing those links so Workshop can open the local MP4 render page.
+
+To populate the local Raindrop dashboard with every local render artifact, run:
+
+```bash
+tools/raindrop_dashboard.sh
+```
+
+This starts Workshop, starts the replay/video server, registers the replay
+agent, and publishes local MP4 render runs with video links attached to the
+Raindrop run and render-task outputs.
 
 See `docs/phase1_runbook.md` for the full runbook.
 

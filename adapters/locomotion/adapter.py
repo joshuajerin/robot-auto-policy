@@ -23,6 +23,7 @@ class LocomotionAdapter:
         "configs/locomotion/actuators.yaml",
         "configs/locomotion/ppo.yaml",
         "configs/locomotion/terrain.yaml",
+        "configs/locomotion/commands.yaml",
     ]
 
     failure_taxonomy = [
@@ -80,4 +81,3 @@ class LocomotionAdapter:
         from adapters.locomotion.failure_diagnosis import diagnose_locomotion_failure
 
         return diagnose_locomotion_failure(rollouts, metrics)
-

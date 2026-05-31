@@ -29,7 +29,8 @@ def ingest_artifact_dir(
     raw_metrics = _load_metrics(artifact_root, manifest)
     score = _score(raw_metrics, experiment_id)
     checkpoint_path = _find_checkpoint_path(artifact_root, manifest)
-    rollout_video_path = _find_rollout_video(artifact_root, manifest)
+    rollout_video_paths = _find_rollout_videos(artifact_root, manifest)
+    rollout_video_path = rollout_video_paths[0] if rollout_video_paths else None
 
     db = ExperimentDB(db_path)
     patch = _baseline_patch(experiment_id, artifact_root)
@@ -60,6 +61,7 @@ def ingest_artifact_dir(
         "score": score.total_score,
         "checkpoint_path": checkpoint_path,
         "rollout_video_path": rollout_video_path,
+        "rollout_video_paths": rollout_video_paths,
         "primary_failure": failure_report.primary_failure,
         "db_path": str(db_path),
     }
@@ -92,12 +94,26 @@ def _find_checkpoint_path(artifact_root: Path, manifest: dict[str, Any]) -> str 
     return str(checkpoints[-1]) if checkpoints else str(manifest.get("checkpoint_path") or "")
 
 
-def _find_rollout_video(artifact_root: Path, manifest: dict[str, Any]) -> str | None:
-    manifest_video = _localize_path(artifact_root, manifest.get("rollout_video_path"))
-    if manifest_video and manifest_video.exists():
-        return str(manifest_video)
-    videos = sorted(artifact_root.rglob("*.mp4"))
-    return str(videos[-1]) if videos else None
+def _find_rollout_videos(artifact_root: Path, manifest: dict[str, Any]) -> list[str]:
+    videos: list[str] = []
+    for value in _manifest_video_values(manifest):
+        path = _localize_path(artifact_root, value)
+        if path and path.exists():
+            videos.append(str(path))
+    if not videos:
+        videos.extend(str(path) for path in sorted(artifact_root.rglob("*.mp4")))
+    return _dedupe(videos)
+
+
+def _manifest_video_values(manifest: dict[str, Any]) -> list[Any]:
+    values: list[Any] = [manifest.get("rollout_video_path")]
+    paths = manifest.get("rollout_video_paths")
+    if isinstance(paths, list):
+        values.extend(paths)
+    files = manifest.get("rollout_video_files")
+    if isinstance(files, list):
+        values.extend(files)
+    return [value for value in values if value]
 
 
 def _localize_path(artifact_root: Path, value: Any) -> Path | None:
@@ -116,6 +132,17 @@ def _load_json_if_exists(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text())
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 def _baseline_patch(experiment_id: str, artifact_root: Path) -> PatchSpec:

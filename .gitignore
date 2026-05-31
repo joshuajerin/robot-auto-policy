@@ -14,4 +14,5 @@ venv/
 artifacts/*
 !artifacts/.gitkeep
 modal_runs/
+external/
 .DS_Store

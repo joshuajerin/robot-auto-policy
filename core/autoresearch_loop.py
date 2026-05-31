@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,7 @@ from agents.scenario_agent import generate_scenarios
 from adapters.locomotion.scenario_generator import classify_frontier
 from core.experiment_db import ExperimentDB
 from core.patch_validator import apply_yaml_patch
+from core.raindrop_trace import RaindropRun, now_ms
 from core.schemas import FailureReport, PatchSpec, ScoreBreakdown
 
 
@@ -44,10 +44,15 @@ BASELINE_RAW_METRICS: dict[str, Any] = {
 }
 
 RAINDROP_EVENT_NAME = "robogenesis-autoresearch-dry-run"
-_RAINDROP_INITIALIZED = False
 
 
-def run_dry_research_loop(repo_root: Path, db_path: Path, experiments: int) -> list[dict[str, Any]]:
+def run_dry_research_loop(
+    repo_root: Path,
+    db_path: Path,
+    experiments: int,
+    *,
+    trace: RaindropRun | None = None,
+) -> list[dict[str, Any]]:
     adapter = LocomotionAdapter()
     db = ExperimentDB(db_path)
     best = adapter.score(BASELINE_RAW_METRICS)
@@ -78,17 +83,64 @@ def run_dry_research_loop(repo_root: Path, db_path: Path, experiments: int) -> l
             "scenario_matrix": history.scenario_matrix,
             "failure_reports": history.failure_reports,
         }
+        started = now_ms()
         patch = propose_locomotion_patch(context)
-        changes = apply_yaml_patch(patch, repo_root=repo_root, dry_run=True)
+        if trace is not None:
+            trace.record_task(
+                "propose_locomotion_patch",
+                input_payload={"experiment_id": experiment_id, "context": context},
+                output_payload=patch.to_dict(),
+                properties={"experiment_id": experiment_id},
+                start_ms=started,
+            )
 
+        started = now_ms()
+        changes = apply_yaml_patch(patch, repo_root=repo_root, dry_run=True)
+        if trace is not None:
+            trace.record_task(
+                "validate_config_patch",
+                input_payload=patch.to_dict(),
+                output_payload=changes,
+                properties={"experiment_id": experiment_id},
+                start_ms=started,
+            )
+
+        started = now_ms()
         scenarios = generate_scenarios(adapter, history)
         db.insert_scenarios(scenarios)
+        if trace is not None:
+            trace.record_task(
+                "generate_eval_scenarios",
+                input_payload={"experiment_id": experiment_id, "history": history.__dict__},
+                output_payload=[scenario.to_dict() for scenario in scenarios],
+                properties={"experiment_id": experiment_id, "scenario_count": len(scenarios)},
+                start_ms=started,
+            )
 
         candidate_policy_id = f"policy_{index + 1:04d}"
+        started = now_ms()
         raw_metrics = _simulate_candidate_metrics(candidate_policy_id, best, patch, index)
         candidate = adapter.score(raw_metrics)
         failure_report = adapter.diagnose([], raw_metrics)
         review = review_policy_candidate(best, candidate)
+        if trace is not None:
+            trace.record_task(
+                "evaluate_candidate_policy",
+                input_payload={"experiment_id": experiment_id, "policy_id": candidate_policy_id, "patch": patch.to_dict()},
+                output_payload={
+                    "raw_metrics": raw_metrics,
+                    "score": candidate.to_dict(),
+                    "failure_report": failure_report.to_dict(),
+                    "review": {"accepted": review.accepted, "reasons": review.reasons},
+                },
+                properties={
+                    "experiment_id": experiment_id,
+                    "policy_id": candidate_policy_id,
+                    "accepted": review.accepted,
+                    "score_after": candidate.total_score,
+                },
+                start_ms=started,
+            )
 
         db.insert_experiment(
             experiment_id=experiment_id,
@@ -111,6 +163,7 @@ def run_dry_research_loop(repo_root: Path, db_path: Path, experiments: int) -> l
 
         scenario_results = []
         for scenario in scenarios:
+            started = now_ms()
             success = _scenario_success_for_candidate(candidate, scenario.difficulty)
             frontier_status = classify_frontier(success)
             failure_modes = [] if success >= 0.5 else [failure_report.primary_failure]
@@ -135,6 +188,19 @@ def run_dry_research_loop(repo_root: Path, db_path: Path, experiments: int) -> l
                     "failure_modes": failure_modes,
                 }
             )
+            if trace is not None:
+                trace.record_task(
+                    "score_generated_scenario",
+                    input_payload={"scenario": scenario.to_dict(), "policy_id": candidate_policy_id},
+                    output_payload=scenario_results[-1],
+                    properties={
+                        "experiment_id": experiment_id,
+                        "policy_id": candidate_policy_id,
+                        "scenario_id": scenario.scenario_id,
+                        "frontier_status": frontier_status,
+                    },
+                    start_ms=started,
+                )
 
         summaries.append(
             {
@@ -172,7 +238,6 @@ def run_traced_dry_research_loop(
 ) -> list[dict[str, Any]]:
     """Run the local AutoResearch loop and mirror one interaction to Workshop."""
 
-    raindrop = _init_raindrop()
     input_payload = trace_input or {
         "experiments": experiments,
         "dbPath": str(db_path),
@@ -189,68 +254,41 @@ def run_traced_dry_research_loop(
     if event_id:
         properties["replayRunId"] = event_id
 
-    interaction = None
-    if raindrop is not None:
-        interaction = raindrop.begin(
-            user_id=user_id,
-            event=RAINDROP_EVENT_NAME,
-            event_id=event_id,
-            input=json.dumps(input_payload, sort_keys=True, default=str),
-            convo_id=convo_id,
-            properties=properties,
-        )
+    trace = RaindropRun.start(
+        event_name=RAINDROP_EVENT_NAME,
+        event_id=event_id,
+        user_id=user_id,
+        convo_id=convo_id,
+        input_payload=input_payload,
+        properties=properties,
+    )
 
     try:
-        summaries = run_dry_research_loop(repo_root, db_path, experiments)
+        summaries = run_dry_research_loop(repo_root, db_path, experiments, trace=trace)
     except Exception as exc:
-        if interaction is not None:
-            interaction.finish(
-                output=json.dumps(
-                    {"status": "error", "message": str(exc)},
-                    sort_keys=True,
-                    default=str,
-                ),
-                properties={**properties, "status": "error"},
-            )
-        if raindrop is not None:
-            raindrop.flush()
-        raise
-
-    if interaction is not None:
-        interaction.finish(
-            output=json.dumps(
-                {"status": "done", "summaries": summaries},
+        trace.finish(
+            output_payload=json.dumps(
+                {"status": "error", "message": str(exc)},
                 sort_keys=True,
                 default=str,
             ),
-            properties={**properties, "status": "done"},
+            status="error",
+            error=exc,
+            properties=properties,
         )
-        raindrop.flush()
+        raise
+
+    trace.finish(
+        output_payload=json.dumps(
+            {"status": "done", "summaries": summaries},
+            sort_keys=True,
+            default=str,
+        ),
+        status="done",
+        properties=properties,
+    )
 
     return summaries
-
-
-def _init_raindrop() -> Any | None:
-    global _RAINDROP_INITIALIZED
-
-    try:
-        import raindrop.analytics as raindrop
-    except ImportError:
-        return None
-
-    if not _RAINDROP_INITIALIZED:
-        api_key = os.environ.get("RAINDROP_WRITE_KEY") or None
-        local_workshop_url = os.environ.get("RAINDROP_LOCAL_DEBUGGER", "http://localhost:5899/v1/")
-        tracing_enabled = bool(api_key)
-        raindrop.init(
-            api_key=api_key,
-            local_workshop_url=local_workshop_url,
-            tracing_enabled=tracing_enabled,
-            auto_instrument=tracing_enabled,
-        )
-        _RAINDROP_INITIALIZED = True
-
-    return raindrop
 
 
 def _simulate_candidate_metrics(

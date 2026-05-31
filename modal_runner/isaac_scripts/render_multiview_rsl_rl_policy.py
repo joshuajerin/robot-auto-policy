@@ -103,7 +103,9 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
             env = RslRlVecEnvWrapper(env)
 
             runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+            print(f"[RoboGenesisRender] loading checkpoint: {args_cli.checkpoint}", flush=True)
             runner.load(args_cli.checkpoint)
+            print("[RoboGenesisRender] checkpoint loaded", flush=True)
             policy = runner.get_inference_policy(device=env.unwrapped.device)
 
             diagnostics = RolloutDiagnostics(
@@ -115,6 +117,11 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
             obs, _ = env.get_observations()
             dt = float(env.unwrapped.physics_dt)
             previous_actions = None
+            print(
+                f"[RoboGenesisRender] starting rollout view={view_name} scenario={args_cli.scenario_id or 'default'} "
+                f"steps={args_cli.video_length}",
+                flush=True,
+            )
 
             for step in range(args_cli.video_length):
                 start_time = time.time()
@@ -137,6 +144,11 @@ def render_multiview(args_cli: argparse.Namespace, simulation_app: Any) -> dict[
                 sleep_time = dt - (time.time() - start_time)
                 if args_cli.real_time and sleep_time > 0:
                     time.sleep(sleep_time)
+            print(
+                f"[RoboGenesisRender] finished rollout view={view_name} frames={len(diagnostics.frames)} "
+                f"done_step={diagnostics.done_step}",
+                flush=True,
+            )
 
             env.close()
             env = None
