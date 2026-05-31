@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 
+SCRIPT_VERSION = "running_patch_type_safe_v2"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default="Isaac-Velocity-Flat-H1-v0")
@@ -59,8 +62,10 @@ def train_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
     agent_cfg = _load_rsl_rl_agent_cfg(args_cli)
     patch_values = _load_patch_values(args_cli.config_patch)
     patch_report = apply_training_patch(env_cfg, agent_cfg, patch_values)
+    patch_report["script_version"] = SCRIPT_VERSION
     if args_cli.patch_report:
         _write_json(Path(args_cli.patch_report), patch_report)
+    print(f"[RoboGenesis train] script_version={SCRIPT_VERSION}", flush=True)
 
     log_dir = _build_log_dir(agent_cfg, args_cli)
     try:
@@ -161,6 +166,8 @@ def _apply_reward_weight(env_cfg: Any, name: str, value: Any, report: dict[str, 
             "object_stability": "object_height_weight",
             "contact_quality": "reach_weight",
             "secure_contact": "reach_weight",
+            "torso_upright": "balance_weight",
+            "stability": "balance_weight",
             "energy_penalty": "action_l2_penalty",
             "smoothness": "action_rate_penalty",
         }

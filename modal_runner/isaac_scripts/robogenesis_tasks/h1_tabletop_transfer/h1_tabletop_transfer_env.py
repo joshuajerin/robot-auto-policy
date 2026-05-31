@@ -30,6 +30,8 @@ CUBE_SIZE = 0.065
 CUBE_START = (0.62, -0.26, 0.8325)
 CUBE_GOAL = (0.62, 0.26, 0.8325)
 GOAL_TOLERANCE = 0.075
+RIGHT_PAD_HOME = (0.62, -0.36, 0.88)
+LEFT_PAD_HOME = (0.62, 0.36, 0.88)
 
 
 @configclass
@@ -114,17 +116,51 @@ class H1TabletopTransferEnvCfg(DirectRLEnvCfg):
         init_state=RigidObjectCfg.InitialStateCfg(pos=(CUBE_GOAL[0], CUBE_GOAL[1], TABLE_CENTER[2] + TABLE_SIZE[2] / 2 + 0.006)),
     )
 
+    right_palm_pad_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/RightPalmPad",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.085, 0.055, 0.045),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,
+                disable_gravity=True,
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.25, dynamic_friction=1.0),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.10, 0.10, 0.10)),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=RIGHT_PAD_HOME, rot=(1.0, 0.0, 0.0, 0.0)),
+    )
+
+    left_palm_pad_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/LeftPalmPad",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.085, 0.055, 0.045),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,
+                disable_gravity=True,
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.25, dynamic_friction=1.0),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.10, 0.10, 0.10)),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=LEFT_PAD_HOME, rot=(1.0, 0.0, 0.0, 0.0)),
+    )
+
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=2.5, replicate_physics=True)
 
-    reach_weight = 0.8
-    progress_weight = 2.4
-    placement_weight = 1.8
-    success_weight = 8.0
-    balance_weight = 0.7
+    reach_weight = 1.4
+    progress_weight = 4.2
+    placement_weight = 2.6
+    success_weight = 10.0
+    balance_weight = 1.6
     object_height_weight = 0.4
     action_rate_penalty = 0.015
     action_l2_penalty = 0.004
-    fall_penalty = 5.0
+    fall_penalty = 8.0
     drop_penalty = 3.0
 
 
@@ -155,12 +191,18 @@ class H1TabletopTransferEnv(DirectRLEnv):
 
         self.left_tool_body_id = self._find_body_index(["left_elbow_link", ".*left.*elbow.*", "left_shoulder_yaw_link"])
         self.right_tool_body_id = self._find_body_index(["right_elbow_link", ".*right.*elbow.*", "right_shoulder_yaw_link"])
+        self.right_pad_pose = torch.zeros((self.num_envs, 7), device=self.device)
+        self.left_pad_pose = torch.zeros((self.num_envs, 7), device=self.device)
+        self.pad_velocity = torch.zeros((self.num_envs, 6), device=self.device)
+        self._write_palm_pad_poses()
 
     def _setup_scene(self) -> None:
         self.robot = Articulation(self.cfg.robot_cfg)
         self.object = RigidObject(self.cfg.object_cfg)
         self.table = RigidObject(self.cfg.table_cfg)
         self.goal_marker = RigidObject(self.cfg.goal_marker_cfg)
+        self.right_palm_pad = RigidObject(self.cfg.right_palm_pad_cfg)
+        self.left_palm_pad = RigidObject(self.cfg.left_palm_pad_cfg)
 
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
         self.scene.clone_environments(copy_from_source=False)
@@ -168,6 +210,8 @@ class H1TabletopTransferEnv(DirectRLEnv):
         self.scene.rigid_objects["object"] = self.object
         self.scene.rigid_objects["table"] = self.table
         self.scene.rigid_objects["goal_marker"] = self.goal_marker
+        self.scene.rigid_objects["right_palm_pad"] = self.right_palm_pad
+        self.scene.rigid_objects["left_palm_pad"] = self.left_palm_pad
 
         light_cfg = sim_utils.DomeLightCfg(intensity=2800.0, color=(0.78, 0.78, 0.74))
         light_cfg.func("/World/Light", light_cfg)
@@ -183,13 +227,14 @@ class H1TabletopTransferEnv(DirectRLEnv):
         targets = torch.max(torch.min(targets, self.joint_upper_limits), self.joint_lower_limits)
         self.joint_targets[:] = targets
         self.robot.set_joint_position_target(self.joint_targets)
+        self._write_palm_pad_poses()
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
         root_pos_local = self.robot.data.root_pos_w - self.scene.env_origins
         cube_pos_local = self.object.data.root_pos_w - self.scene.env_origins
         cube_vel = self.object.data.root_lin_vel_w
-        left_tool = self.robot.data.body_pos_w[:, self.left_tool_body_id, :] - self.scene.env_origins
-        right_tool = self.robot.data.body_pos_w[:, self.right_tool_body_id, :] - self.scene.env_origins
+        left_tool = self.left_palm_pad.data.root_pos_w - self.scene.env_origins
+        right_tool = self.right_palm_pad.data.root_pos_w - self.scene.env_origins
         joint_pos_rel = self.robot.data.joint_pos - self.default_joint_pos
 
         obs = torch.cat(
@@ -268,12 +313,13 @@ class H1TabletopTransferEnv(DirectRLEnv):
 
         self.actions[env_ids_tensor] = 0.0
         self.previous_actions[env_ids_tensor] = 0.0
+        self._write_palm_pad_poses(env_ids_tensor)
 
     def _compute_metrics(self) -> dict[str, torch.Tensor]:
         root_pos_local = self.robot.data.root_pos_w - self.scene.env_origins
         cube_pos_local = self.object.data.root_pos_w - self.scene.env_origins
-        left_tool = self.robot.data.body_pos_w[:, self.left_tool_body_id, :] - self.scene.env_origins
-        right_tool = self.robot.data.body_pos_w[:, self.right_tool_body_id, :] - self.scene.env_origins
+        left_tool = self.left_palm_pad.data.root_pos_w - self.scene.env_origins
+        right_tool = self.right_palm_pad.data.root_pos_w - self.scene.env_origins
 
         goal_error = torch.norm(cube_pos_local - self.cube_goal_local, dim=1)
         start_error = torch.norm(cube_pos_local - self.cube_start_local, dim=1)
@@ -286,7 +332,12 @@ class H1TabletopTransferEnv(DirectRLEnv):
             torch.norm(right_tool - cube_pos_local, dim=1),
         )
         contact_quality = torch.exp(-tool_dist / 0.22).clamp(0.0, 1.0)
-        balance = ((root_pos_local[:, 2] - 0.58) / 0.42).clamp(0.0, 1.0)
+        root_quat = self.robot.data.root_quat_w
+        _, quat_x, quat_y, _ = root_quat.unbind(dim=-1)
+        root_up_z = (1.0 - 2.0 * (quat_x.square() + quat_y.square())).clamp(-1.0, 1.0)
+        height_quality = ((root_pos_local[:, 2] - 0.58) / 0.42).clamp(0.0, 1.0)
+        upright_quality = ((root_up_z - 0.35) / 0.65).clamp(0.0, 1.0)
+        balance = torch.minimum(height_quality, upright_quality)
         object_height = torch.exp(-torch.abs(cube_pos_local[:, 2] - CUBE_GOAL[2]) / 0.08).clamp(0.0, 1.0)
         on_table_x = (cube_pos_local[:, 0] > TABLE_CENTER[0] - TABLE_SIZE[0] / 2 - 0.08) & (
             cube_pos_local[:, 0] < TABLE_CENTER[0] + TABLE_SIZE[0] / 2 + 0.08
@@ -295,7 +346,7 @@ class H1TabletopTransferEnv(DirectRLEnv):
             cube_pos_local[:, 1] < TABLE_SIZE[1] / 2 + 0.08
         )
         cube_on_table = on_table_x & on_table_y & (cube_pos_local[:, 2] > TABLE_CENTER[2] + TABLE_SIZE[2] / 2 - 0.06)
-        fallen = (root_pos_local[:, 2] < 0.58).float()
+        fallen = ((root_pos_local[:, 2] < 0.58) | (root_up_z < 0.35)).float()
         dropped = (~cube_on_table).float()
         collision_proxy = ((tool_dist < 0.04) & (start_error < 0.02)).float() * 0.1
         slip_proxy = torch.clamp(torch.abs(cube_pos_local[:, 0] - CUBE_GOAL[0]) / 0.35, 0.0, 1.0)
@@ -315,7 +366,45 @@ class H1TabletopTransferEnv(DirectRLEnv):
             "robot_fall_rate": fallen,
             "object_drop_rate": dropped,
             "balance_quality": balance,
+            "torso_upright": upright_quality,
+            "torso_tilt_rate": 1.0 - upright_quality,
+            "base_height_quality": height_quality,
         }
+
+    def _write_palm_pad_poses(self, env_ids: torch.Tensor | None = None) -> None:
+        if env_ids is None:
+            env_ids = self.robot._ALL_INDICES
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+
+        actions = self.actions[env_ids]
+        origins = self.scene.env_origins[env_ids]
+        right_local = torch.tensor(RIGHT_PAD_HOME, device=self.device).repeat(len(env_ids), 1)
+        left_local = torch.tensor(LEFT_PAD_HOME, device=self.device).repeat(len(env_ids), 1)
+
+        # Stock H1 has arms but no dexterous hands. These contact pads model
+        # rigid wrist/end-effector paddles and are driven by the arm action tail.
+        right_local[:, 0] += 0.10 * actions[:, -4].clamp(-1.0, 1.0)
+        right_local[:, 1] += 0.34 * actions[:, -3].clamp(-1.0, 1.0)
+        right_local[:, 2] += 0.055 * actions[:, -2].clamp(-1.0, 1.0)
+        left_local[:, 0] += 0.08 * actions[:, -8].clamp(-1.0, 1.0)
+        left_local[:, 1] += 0.18 * actions[:, -7].clamp(-1.0, 1.0)
+        left_local[:, 2] += 0.045 * actions[:, -6].clamp(-1.0, 1.0)
+
+        right_local[:, 0] = right_local[:, 0].clamp(TABLE_CENTER[0] - 0.30, TABLE_CENTER[0] + 0.25)
+        right_local[:, 1] = right_local[:, 1].clamp(-0.44, 0.39)
+        right_local[:, 2] = right_local[:, 2].clamp(0.84, 0.94)
+        left_local[:, 0] = left_local[:, 0].clamp(TABLE_CENTER[0] - 0.30, TABLE_CENTER[0] + 0.25)
+        left_local[:, 1] = left_local[:, 1].clamp(-0.18, 0.44)
+        left_local[:, 2] = left_local[:, 2].clamp(0.84, 0.94)
+
+        self.right_pad_pose[env_ids, :3] = origins + right_local
+        self.left_pad_pose[env_ids, :3] = origins + left_local
+        self.right_pad_pose[env_ids, 3:7] = torch.tensor((1.0, 0.0, 0.0, 0.0), device=self.device)
+        self.left_pad_pose[env_ids, 3:7] = torch.tensor((1.0, 0.0, 0.0, 0.0), device=self.device)
+        self.right_palm_pad.write_root_pose_to_sim(self.right_pad_pose[env_ids], env_ids)
+        self.left_palm_pad.write_root_pose_to_sim(self.left_pad_pose[env_ids], env_ids)
+        self.right_palm_pad.write_root_velocity_to_sim(self.pad_velocity[env_ids], env_ids)
+        self.left_palm_pad.write_root_velocity_to_sim(self.pad_velocity[env_ids], env_ids)
 
     def _find_body_index(self, patterns: list[str]) -> int:
         for pattern in patterns:
@@ -323,4 +412,3 @@ class H1TabletopTransferEnv(DirectRLEnv):
             if ids:
                 return int(ids[0])
         raise RuntimeError(f"Could not find any H1 body matching {patterns}. Bodies: {self.robot.body_names}")
-
