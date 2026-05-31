@@ -1,0 +1,39 @@
+skill_id: humanoid_motion_imitation_v1
+name: Humanoid Motion Imitation From User Video
+task_family: locomotion
+robot: unitree_h1
+input:
+  video_format: mp4
+  expected_view: full_body_side_or_three_quarter
+  minimum_visibility:
+    - pelvis
+    - hips
+    - knees
+    - ankles
+    - shoulders
+    - elbows
+pipeline:
+  - sample_video_frames
+  - estimate_2d_or_3d_pose
+  - extract_gait_phase_and_limb_timing
+  - retarget_human_keypoints_to_h1_joint_targets
+  - generate_reference_motion_context
+  - train_with_style_rewards_then_imitation_rewards
+outputs:
+  - motion_imitation_context.json
+  - h1_retarget_map.json
+  - training_hooks.json
+constraints:
+  llm_direct_torque_control: false
+  evaluator_locked: true
+  joint_limits_source: assets/h1_robot_spec.json
+  retargeting_is_reference_only: true
+training_surface:
+  allowed_files:
+    - configs/locomotion/rewards.yaml
+    - configs/locomotion/curriculum.yaml
+    - configs/locomotion/domain_randomization.yaml
+notes:
+  - "Phase 1 uses video as style context only."
+  - "Phase 2 converts pose tracks into H1-compatible reference trajectories."
+  - "Phase 3 trains imitation or AMP-style rewards against the reference library."
