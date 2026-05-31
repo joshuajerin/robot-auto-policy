@@ -228,6 +228,18 @@ def build_render_commands(
                 ]
                 lines.append(f"echo {quote(f'=== rendering {scenario_id} {view} ===')} | tee -a /artifacts/multiview_render.log")
                 lines.append(" ".join(shell_arg(part) for part in command) + " 2>&1 | tee -a /artifacts/multiview_render.log")
+                lines.extend(
+                    fallback_diagnostics_lines(
+                        output_dir=output_dir,
+                        view=str(view),
+                        scenario_id=scenario_id,
+                        policy_id=args.experiment_id,
+                        task=str(job["task"]),
+                        checkpoint=checkpoint,
+                        seed=int(job["seed"]),
+                        video_length=int(args.video_length),
+                    )
+                )
                 lines.append(f"cp {quote(output_dir + '/multiview_diagnostics.json')} {quote(output_dir + '/' + str(view) + '_diagnostics.json')}")
         return "\n".join(lines)
 
@@ -257,8 +269,89 @@ def build_render_commands(
         ]
         lines.append(f"echo {quote(f'=== rendering {view} ===')} | tee -a /artifacts/multiview_render.log")
         lines.append(" ".join(shell_arg(part) for part in command) + " 2>&1 | tee -a /artifacts/multiview_render.log")
+        lines.extend(
+            fallback_diagnostics_lines(
+                output_dir="/artifacts/multiview",
+                view=view,
+                scenario_id="",
+                policy_id=args.experiment_id,
+                task=args.task,
+                checkpoint=checkpoint,
+                seed=int(args.seed),
+                video_length=int(args.video_length),
+            )
+        )
         lines.append(f"cp /artifacts/multiview/multiview_diagnostics.json /artifacts/multiview/{view}_diagnostics.json")
     return "\n".join(lines)
+
+
+def fallback_diagnostics_lines(
+    *,
+    output_dir: str,
+    view: str,
+    scenario_id: str,
+    policy_id: str,
+    task: str,
+    checkpoint: str,
+    seed: int,
+    video_length: int,
+) -> list[str]:
+    payload = {
+        "output_dir": output_dir,
+        "view": view,
+        "scenario_id": scenario_id,
+        "policy_id": policy_id,
+        "task": task,
+        "checkpoint": checkpoint,
+        "seed": seed,
+        "video_length": video_length,
+    }
+    return [
+        f"if [ ! -f {quote(output_dir + '/multiview_diagnostics.json')} ]; then",
+        "python3 - <<'PY'",
+        "import json",
+        "import pathlib",
+        f"payload = {json.dumps(payload, sort_keys=True)}",
+        "output_dir = pathlib.Path(payload['output_dir'])",
+        "view = payload['view']",
+        "view_dir = output_dir / view",
+        "videos = sorted(str(path) for path in view_dir.glob('*.mp4'))",
+        "view_report = {",
+        "    'view': view,",
+        "    'scenario_id': payload['scenario_id'] or None,",
+        "    'policy_id': payload['policy_id'],",
+        "    'seed': payload['seed'],",
+        "    'frame_count': None,",
+        "    'done_step': None,",
+        "    'mean_reward': 0.0,",
+        "    'mean_command_error_xy': 0.0,",
+        "    'max_torso_tilt_xy': 0.0,",
+        "    'mean_torso_tilt_xy': 0.0,",
+        "    'mean_action_l2': 0.0,",
+        "    'mean_action_jerk': 0.0,",
+        "    'video_dir': str(view_dir),",
+        "    'video_paths': videos,",
+        "    'primary_video_path': videos[-1] if videos else None,",
+        "}",
+        "report = {",
+        "    'policy_id': payload['policy_id'],",
+        "    'task': payload['task'],",
+        "    'checkpoint': payload['checkpoint'],",
+        "    'scenario_id': payload['scenario_id'] or None,",
+        "    'seed': payload['seed'],",
+        "    'video_length': payload['video_length'],",
+        "    'views': [view_report],",
+        "    'diagnosis': {",
+        "        'primary_failure': 'video_only_diagnostics',",
+        "        'secondary_failures': ['missing_rollout_json_diagnostics'],",
+        "        'evidence': {'video_paths': videos},",
+        "        'suggested_research_directions': ['rerun diagnostics path; video artifact exists but rollout JSON was not emitted'],",
+        "    },",
+        "}",
+        "(output_dir / 'multiview_diagnostics.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\\n')",
+        "PY",
+        "fi",
+    ]
 
 
 def bounded_views(views_arg: str, max_videos: int) -> list[str]:
