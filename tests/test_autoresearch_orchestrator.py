@@ -92,7 +92,11 @@ def test_orchestrator_prepares_manipulation_adapter_spec(tmp_path) -> None:
 
     assert steps[0].parent_policy_id == "baseline_manipulation_0000"
     assert spec["task_family"] == "manipulation"
-    assert spec["runner"]["status"] == "not_configured"
+    assert spec["task"] == "RoboGenesis-H1-Tabletop-Manipulation-v0"
+    assert spec["runner"] == "rsl_rl"
+    assert spec["train"]["max_iterations"] == 10
+    assert spec["train"]["use_patched_runner"] is True
+    assert spec["autoresearch"]["training_surface"]["scene"] == "tabletop_transfer"
     assert spec["autoresearch"]["generated_scenarios"][0]["objects"]
 
 

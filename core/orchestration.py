@@ -17,6 +17,7 @@ from agents.scenario_agent import generate_scenarios
 from core.autoresearch_loop import BASELINE_RAW_METRICS
 from core.experiment_db import ExperimentDB
 from core.patch_validator import apply_yaml_patch, validate_patch_spec
+from core.raindrop_trace import RaindropRun, now_ms
 from core.schemas import PatchSpec, ScenarioSpec, ScoreBreakdown
 from modal_runner.deployed import DEFAULT_APP_NAME, submit_phase1_specs_to_deployed
 from modal_runner.phase1 import build_phase1_spec
@@ -85,12 +86,27 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     adapter = get_task_adapter(config.task_family)
-    if config.submit and adapter.task_family != "locomotion":
-        raise ValueError("Modal submission is currently wired only for locomotion Phase-1 jobs")
-
+    trace = RaindropRun.start(
+        event_name="robogenesis-modal-orchestration",
+        input_payload=_orchestration_trace_input(config),
+        properties={
+            "task_family": config.task_family,
+            "experiments": config.experiments,
+            "submit": config.submit,
+            "source": "core.orchestration",
+        },
+    )
     db = ExperimentDB(config.db_path)
     try:
+        started = now_ms()
         best = _ensure_best_policy(db, adapter)
+        trace.record_task(
+            "load_best_policy",
+            input_payload={"task_family": adapter.task_family},
+            output_payload=best.to_dict(),
+            properties={"task_family": adapter.task_family, "policy_id": best.policy_id},
+            start_ms=started,
+        )
         steps: list[OrchestrationStep] = []
 
         for index in range(max(1, config.experiments)):
@@ -102,13 +118,34 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
                 failure_reports=db.recent_failures(5),
             )
             context = _planner_context(adapter, best, history)
+            started = now_ms()
             patch = _propose_patch(context, use_openai=config.use_openai)
             validate_patch_spec(patch).raise_for_errors()
             config_changes = apply_yaml_patch(patch, repo_root=repo_root, dry_run=True)
+            trace.record_task(
+                "propose_and_validate_patch",
+                input_payload={"experiment_id": experiment_id, "context": context},
+                output_payload={"patch": patch.to_dict(), "config_changes": config_changes},
+                properties={"experiment_id": experiment_id, "task_family": adapter.task_family},
+                start_ms=started,
+            )
 
+            started = now_ms()
             scenarios = generate_scenarios(adapter, history)
             db.insert_scenarios(scenarios)
+            trace.record_task(
+                "generate_scenarios",
+                input_payload={"experiment_id": experiment_id, "history": history.__dict__},
+                output_payload=[scenario.to_dict() for scenario in scenarios],
+                properties={
+                    "experiment_id": experiment_id,
+                    "task_family": adapter.task_family,
+                    "scenario_count": len(scenarios),
+                },
+                start_ms=started,
+            )
 
+            started = now_ms()
             modal_spec = _build_experiment_spec(
                 config,
                 adapter=adapter,
@@ -121,16 +158,31 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
             )
             spec_path = output_dir / f"{experiment_id}.json"
             spec_path.write_text(json.dumps(modal_spec, indent=2, sort_keys=True) + "\n")
+            trace.record_task(
+                "write_modal_experiment_spec",
+                input_payload={"experiment_id": experiment_id, "output_dir": str(output_dir)},
+                output_payload={"modal_spec_path": str(spec_path), "modal_spec": modal_spec},
+                properties={"experiment_id": experiment_id, "task_family": adapter.task_family},
+                start_ms=started,
+            )
 
             call_id = None
             status = "proposed"
             if config.submit:
+                started = now_ms()
                 call_id = submit_phase1_specs_to_deployed(
                     [modal_spec],
                     app_name=config.app_name,
                     environment_name=config.environment_name,
                 )[0]
                 status = "running"
+                trace.record_task(
+                    "submit_modal_phase1_job",
+                    input_payload={"experiment_id": experiment_id, "app_name": config.app_name},
+                    output_payload={"function_call_id": call_id, "status": status},
+                    properties={"experiment_id": experiment_id, "modal_call_id": call_id},
+                    start_ms=started,
+                )
 
             db.insert_experiment(
                 experiment_id=experiment_id,
@@ -157,7 +209,19 @@ def run_orchestration(config: OrchestrationConfig) -> list[OrchestrationStep]:
                 )
             )
 
+        trace.finish(
+            output_payload={"status": "done", "steps": [step.to_dict() for step in steps]},
+            status="done",
+            properties={"step_count": len(steps)},
+        )
         return steps
+    except Exception as exc:
+        trace.finish(
+            output_payload={"status": "error", "message": str(exc)},
+            status="error",
+            error=exc,
+        )
+        raise
     finally:
         db.close()
 
@@ -380,6 +444,52 @@ def _build_adapter_research_spec(
     config_changes: dict[str, dict[str, Any]],
     scenarios: list[ScenarioSpec],
 ) -> dict[str, Any]:
+    if adapter.task_family == "manipulation":
+        phase1_config = config.phase1_config
+        if phase1_config == Path("configs/locomotion/phase1_h1.yaml"):
+            phase1_config = Path("configs/manipulation/phase1_h1_tabletop.yaml")
+        if not phase1_config.is_absolute():
+            phase1_config = config.repo_root / phase1_config
+        overrides = SimpleNamespace(
+            task=adapter.default_task_spec().base_env,
+            runner="rsl_rl",
+            device="",
+            num_envs=config.num_envs,
+            max_iterations=config.max_iterations,
+            seed=seed,
+            video_length=config.video_length,
+            style_context="",
+            motion_context="",
+        )
+        spec = build_phase1_spec(phase1_config, experiment_id, overrides)
+        _apply_patch_to_modal_spec(spec, patch)
+        spec.setdefault("train", {})["use_patched_runner"] = True
+        spec["task_family"] = adapter.task_family
+        spec["task_spec"] = adapter.default_task_spec().to_dict()
+        spec["autoresearch"] = {
+            "parent_policy_id": best.policy_id,
+            "score_before": best.total_score,
+            "patch": patch.to_dict(),
+            "config_changes": config_changes,
+            "generated_scenarios": [scenario.to_dict() for scenario in scenarios],
+            "created_at": datetime.now(UTC).isoformat(),
+            "controller": "core.orchestration",
+            "quick_iteration": {
+                "num_envs": config.num_envs,
+                "max_iterations": config.max_iterations,
+                "seed": seed,
+                "video_length": config.video_length,
+            },
+            "training_surface": {
+                "robot": "unitree_h1",
+                "scene": "tabletop_transfer",
+                "object_task": "move target cube from left side of table to right-side goal region",
+                "runner": "modal.phase1_baseline_job",
+                "custom_env": "modal_runner/isaac_scripts/robogenesis_tasks/h1_tabletop_transfer/h1_tabletop_transfer_env.py",
+            },
+        }
+        return spec
+
     return {
         "experiment_id": experiment_id,
         "task_family": adapter.task_family,
@@ -432,3 +542,23 @@ def _experiment_id(prefix: str, *, index: int, seed: int) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     safe_prefix = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in prefix).strip("_")
     return f"{safe_prefix}_{stamp}_iter-{index + 1:02d}_seed-{seed}"
+
+
+def _orchestration_trace_input(config: OrchestrationConfig) -> dict[str, Any]:
+    return {
+        "repo_root": str(config.repo_root),
+        "db_path": str(config.db_path),
+        "task_family": config.task_family,
+        "phase1_config": str(config.phase1_config),
+        "output_dir": str(config.output_dir),
+        "experiment_prefix": config.experiment_prefix,
+        "experiments": config.experiments,
+        "seed_start": config.seed_start,
+        "num_envs": config.num_envs,
+        "max_iterations": config.max_iterations,
+        "video_length": config.video_length,
+        "use_openai": config.use_openai,
+        "submit": config.submit,
+        "app_name": config.app_name,
+        "environment_name": config.environment_name,
+    }

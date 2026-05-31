@@ -39,6 +39,7 @@ def find_h1_usd(search_roots: list[Path]) -> list[str]:
 
 def inspect_task_asset(task: str) -> dict[str, Any]:
     report: dict[str, Any] = {"resolved": False, "candidates": [], "error": None}
+    _register_robogenesis_tasks()
     try:
         from isaaclab_tasks.utils import parse_env_cfg
     except Exception as exc:  # pragma: no cover - requires Isaac Lab
@@ -79,6 +80,13 @@ def resolve_asset_path(value: str) -> str | None:
             expanded = expanded.replace("{" + token + "}", replacement)
     path = Path(expanded)
     return str(path) if path.exists() else None
+
+
+def _register_robogenesis_tasks() -> None:
+    try:
+        import robogenesis_tasks  # noqa: F401
+    except Exception:
+        return
 
 
 def export_asset_bundle(candidates: list[str], export_dir: Path, bundled_asset_dir: Path | None) -> dict[str, Any]:
