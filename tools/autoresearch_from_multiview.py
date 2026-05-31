@@ -34,6 +34,8 @@ from modal_runner.phase1 import build_phase1_spec
 ACTION_JERK_THRESHOLD = 0.24
 TORSO_TILT_THRESHOLD = 0.30
 COMMAND_ERROR_THRESHOLD = 0.30
+DEFAULT_FLAT_TASK = "Isaac-Velocity-Flat-H1-v0"
+DEFAULT_ROUGH_TASK = "Isaac-Velocity-Rough-H1-v0"
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,11 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=4096)
     parser.add_argument("--max-iterations", type=int, default=400)
     parser.add_argument("--video-length", type=int, default=240)
+    parser.add_argument(
+        "--train-task",
+        default="auto",
+        help="Isaac Lab task for the next run. Use 'auto', 'flat', 'rough', or an explicit task id.",
+    )
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
     parser.add_argument("--env", default="")
@@ -87,6 +94,7 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
     score_before = _score_before(raw_metrics_path)
     failure_report = _diagnose_multiview(multiview_summary)
     patch = _propose_multiview_patch(
+        multiview_summary=multiview_summary,
         failure_report=failure_report,
         max_iterations=args.max_iterations,
         num_envs=args.num_envs,
@@ -95,6 +103,7 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
     config_changes = apply_yaml_patch(patch, repo_root=REPO_ROOT, dry_run=True)
 
     scenarios = _generate_scenarios(failure_report)
+    train_task = _select_train_task(args.train_task, patch, scenarios)
     output_dir = (REPO_ROOT / args.output_dir).resolve() if not Path(args.output_dir).is_absolute() else Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,11 +119,12 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
         "patch": patch.to_dict(),
         "config_changes": config_changes,
         "generated_scenarios": [scenario.to_dict() for scenario in scenarios],
+        "train_task": train_task,
         "note": (
-            "Videos are passed as research inputs for diagnosis and lineage. "
-            "The locked Phase-1 Modal runner directly applies PPO controls; "
-            "reward/curriculum patches are recorded until the Isaac adapter maps "
-            "them into task-specific environment configs."
+            "Videos are passed as research inputs for diagnosis and lineage. The current "
+            "Phase-1 Modal runner directly applies PPO controls and the selected Isaac "
+            "Lab task. Reward, actuator, curriculum, terrain, and randomization patches "
+            "are recorded as bounded research directives for the Isaac adapter patcher."
         ),
     }
 
@@ -138,6 +148,7 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
             num_envs=args.num_envs,
             max_iterations=args.max_iterations,
             video_length=args.video_length,
+            train_task=train_task,
             parent_policy_id=parent_policy_id,
             score_before=score_before,
             patch=patch,
@@ -186,6 +197,7 @@ def run_from_multiview(args: argparse.Namespace) -> MultiviewAutoResearchResult:
 
 
 def _summarize_multiview(data: dict[str, Any], input_path: Path) -> dict[str, Any]:
+    motor_diagnostics = _motor_diagnostics(data)
     view_summaries: list[dict[str, Any]] = []
     for view in data.get("views", []):
         video_path = _local_video_path(input_path, view.get("primary_video_path"))
@@ -214,7 +226,89 @@ def _summarize_multiview(data: dict[str, Any], input_path: Path) -> dict[str, An
         "view_count": data.get("view_count", len(view_summaries)),
         "views": view_summaries,
         "diagnoses": _compact_diagnoses(data.get("diagnoses", [])),
+        "motor_diagnostics": motor_diagnostics,
     }
+
+
+def _motor_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
+    robot_spec = _load_robot_spec()
+    names = robot_spec.get("controlled_joints", [])
+    groups = robot_spec.get("actuator_groups", {})
+    if not names:
+        names = [f"motor_{index:02d}" for index in range(19)]
+
+    accumulators = [
+        {
+            "action_abs_sum": 0.0,
+            "action_abs_count": 0,
+            "action_jerk_sum": 0.0,
+            "action_jerk_count": 0,
+            "joint_vel_abs_sum": 0.0,
+            "joint_vel_abs_count": 0,
+        }
+        for _ in names
+    ]
+
+    for view in data.get("views", []):
+        previous_actions: list[float] | None = None
+        for frame in view.get("frames", []):
+            actions = _float_list(frame.get("actions"))
+            joint_vel = _float_list(frame.get("joint_vel"))
+            for index, action in enumerate(actions[: len(accumulators)]):
+                accumulators[index]["action_abs_sum"] += abs(action)
+                accumulators[index]["action_abs_count"] += 1
+                if previous_actions and index < len(previous_actions):
+                    accumulators[index]["action_jerk_sum"] += abs(action - previous_actions[index])
+                    accumulators[index]["action_jerk_count"] += 1
+            for index, velocity in enumerate(joint_vel[: len(accumulators)]):
+                accumulators[index]["joint_vel_abs_sum"] += abs(velocity)
+                accumulators[index]["joint_vel_abs_count"] += 1
+            previous_actions = actions
+
+    motors: list[dict[str, Any]] = []
+    for index, name in enumerate(names):
+        acc = accumulators[index]
+        motors.append(
+            {
+                "index": index,
+                "name": name,
+                "mean_abs_action": _safe_ratio(acc["action_abs_sum"], acc["action_abs_count"]),
+                "mean_abs_action_delta": _safe_ratio(acc["action_jerk_sum"], acc["action_jerk_count"]),
+                "mean_abs_joint_velocity": _safe_ratio(acc["joint_vel_abs_sum"], acc["joint_vel_abs_count"]),
+            }
+        )
+
+    top_by_jerk = sorted(motors, key=lambda item: item["mean_abs_action_delta"], reverse=True)[:6]
+    top_by_velocity = sorted(motors, key=lambda item: item["mean_abs_joint_velocity"], reverse=True)[:6]
+    group_stats: dict[str, dict[str, Any]] = {}
+    for group, group_names in groups.items():
+        group_motors = [motor for motor in motors if motor["name"] in group_names]
+        if not group_motors:
+            continue
+        group_stats[group] = {
+            "mean_abs_action_delta": sum(motor["mean_abs_action_delta"] for motor in group_motors) / len(group_motors),
+            "mean_abs_joint_velocity": sum(motor["mean_abs_joint_velocity"] for motor in group_motors) / len(group_motors),
+            "motors": [motor["name"] for motor in group_motors],
+        }
+
+    dominant_group = None
+    if group_stats:
+        dominant_group = max(group_stats.items(), key=lambda item: item[1]["mean_abs_action_delta"])[0]
+
+    return {
+        "controlled_joint_count": len(names),
+        "dominant_action_jerk_group": dominant_group,
+        "top_motors_by_action_delta": top_by_jerk,
+        "top_motors_by_joint_velocity": top_by_velocity,
+        "groups": group_stats,
+    }
+
+
+def _load_robot_spec() -> dict[str, Any]:
+    path = REPO_ROOT / "assets" / "h1_robot_spec.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
 
 
 def _compact_diagnoses(diagnoses: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -287,12 +381,19 @@ def _diagnose_multiview(summary: dict[str, Any]) -> FailureReport:
         directions = ["increase command tracking pressure", "extend PPO budget before harder scenarios"]
     elif mean_action_jerk > ACTION_JERK_THRESHOLD or _has_secondary(summary, "oscillatory_actions"):
         primary = "oscillatory_actions"
+        dominant_group = (summary.get("motor_diagnostics") or {}).get("dominant_action_jerk_group")
         secondary.extend(["action_jerk", "energy_spikes"])
+        if dominant_group:
+            secondary.append(f"{dominant_group}_action_jerk")
         likely_causes = [
             "the policy is viable but still produces abrupt action changes",
-            "smoothness and energy terms should be strengthened before scaling terrain difficulty",
+            "smoothness, actuator scaling, and energy terms should be strengthened before scaling terrain difficulty",
         ]
-        directions = ["increase smoothness and energy penalties", "evaluate motor-delay and push scenarios next"]
+        directions = [
+            "increase smoothness and energy penalties",
+            "adjust the highest-jerk actuator groups",
+            "train/evaluate on rough terrain, friction, motor-delay, and push scenarios next",
+        ]
     else:
         primary = "no_major_failure_detected"
         secondary.extend(["needs_harder_scenarios"])
@@ -305,6 +406,7 @@ def _diagnose_multiview(summary: dict[str, Any]) -> FailureReport:
         evidence={
             "aggregate": aggregate,
             "view_count": summary.get("view_count"),
+            "motor_diagnostics": summary.get("motor_diagnostics", {}),
             "video_inputs": [
                 {
                     "view": view.get("view"),
@@ -328,6 +430,7 @@ def _has_secondary(summary: dict[str, Any], label: str) -> bool:
 
 def _propose_multiview_patch(
     *,
+    multiview_summary: dict[str, Any],
     failure_report: FailureReport,
     max_iterations: int,
     num_envs: int,
@@ -363,20 +466,41 @@ def _propose_multiview_patch(
             rollback="Restore command tracking/stability weights and previous PPO budget.",
         )
     if failure_report.primary_failure == "oscillatory_actions":
+        actuator_patch = _actuator_patch_for_motor_diagnostics(multiview_summary.get("motor_diagnostics", {}))
         return PatchSpec(
-            experiment_name="multiview_reduce_action_jerk",
-            hypothesis="The multiview rollout is stable but has elevated action jerk, so strengthen smoothness/energy pressure and continue PPO.",
-            allowed_files=["configs/locomotion/rewards.yaml", "configs/locomotion/ppo.yaml"],
+            experiment_name="multiview_motor_friction_terrain_curriculum",
+            hypothesis="The multiview rollout is stable but has elevated per-motor action jerk, so tune high-jerk actuator groups and move training onto a friction/roughness/push curriculum.",
+            allowed_files=[
+                "configs/locomotion/rewards.yaml",
+                "configs/locomotion/actuators.yaml",
+                "configs/locomotion/domain_randomization.yaml",
+                "configs/locomotion/curriculum.yaml",
+                "configs/locomotion/terrain.yaml",
+                "configs/locomotion/ppo.yaml",
+            ],
             patch={
                 "reward_weights.smoothness": 0.18,
                 "reward_weights.energy_penalty": 0.07,
                 "reward_weights.torso_upright": 0.48,
+                **actuator_patch,
+                "domain_randomization.friction_range": [0.55, 1.25],
+                "domain_randomization.motor_strength_scale": [0.85, 1.12],
+                "domain_randomization.action_delay_steps": [0, 2],
+                "domain_randomization.push_impulse_probability": 0.05,
+                "domain_randomization.push_force_range_n": [20, 90],
+                "curriculum.roughness_start": 0.01,
+                "curriculum.roughness_end": 0.07,
+                "curriculum.push_probability_end": 0.06,
+                "terrain.type": "rough",
+                "terrain.height_noise_m": 0.04,
+                "terrain.slope_range_deg": [-6.0, 6.0],
+                "terrain.rough_heightfield_enabled": True,
                 "ppo.max_iterations": max_iterations,
                 "ppo.num_envs": num_envs,
             },
-            expected_effect="Smoother gait in side/front/diagonal views with lower action jerk and no fall regression.",
-            risk="May weaken fast recovery if smoothness is over-weighted.",
-            rollback="Restore smoothness, energy, torso-upright weights, and previous PPO budget.",
+            expected_effect="Smoother per-joint actions plus better robustness under rough terrain, lower friction, action delay, motor variation, and side pushes.",
+            risk="Harder terrain/randomization can slow early learning or reduce flat-ground command tracking if scaled too aggressively.",
+            rollback="Restore reward, actuator, randomization, terrain, curriculum, and PPO values to the previous accepted policy.",
         )
     return PatchSpec(
         experiment_name="multiview_frontier_scenario_probe",
@@ -405,6 +529,46 @@ def _generate_scenarios(failure_report: FailureReport) -> list[ScenarioSpec]:
     return adapter.generate_scenarios(history)
 
 
+def _actuator_patch_for_motor_diagnostics(motor_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """Choose conservative actuator scale edits from per-joint rollout stats."""
+
+    dominant_group = motor_diagnostics.get("dominant_action_jerk_group")
+    patch: dict[str, Any] = {
+        "actuators.damping_scale": 1.08,
+        "actuators.stiffness_scale": 0.95,
+    }
+    if dominant_group == "ankles":
+        patch["actuators.ankle_action_scale"] = 0.36
+    elif dominant_group == "knees":
+        patch["actuators.knee_action_scale"] = 0.45
+    elif dominant_group == "hips":
+        patch["actuators.hip_action_scale"] = 0.45
+    elif dominant_group == "torso":
+        patch["actuators.torso_action_scale"] = 0.40
+    elif dominant_group == "arms":
+        patch["actuators.arm_action_scale"] = 0.35
+    else:
+        patch["actuators.ankle_action_scale"] = 0.38
+    return patch
+
+
+def _select_train_task(train_task_arg: str, patch: PatchSpec, scenarios: list[ScenarioSpec]) -> str:
+    if train_task_arg and train_task_arg not in {"auto", "flat", "rough"}:
+        return train_task_arg
+    if train_task_arg == "flat":
+        return DEFAULT_FLAT_TASK
+    if train_task_arg == "rough":
+        return DEFAULT_ROUGH_TASK
+
+    patch_requests_rough = (
+        patch.patch.get("terrain.type") == "rough"
+        or bool(patch.patch.get("terrain.rough_heightfield_enabled"))
+        or _float(patch.patch.get("terrain.height_noise_m")) > 0.0
+    )
+    scenario_requests_rough = any((scenario.terrain or {}).get("type") in {"rough", "slope"} for scenario in scenarios)
+    return DEFAULT_ROUGH_TASK if patch_requests_rough or scenario_requests_rough else DEFAULT_FLAT_TASK
+
+
 def _build_modal_spec(
     *,
     phase1_config: Path,
@@ -413,6 +577,7 @@ def _build_modal_spec(
     num_envs: int,
     max_iterations: int,
     video_length: int,
+    train_task: str,
     parent_policy_id: str,
     score_before: float | None,
     patch: PatchSpec,
@@ -423,7 +588,7 @@ def _build_modal_spec(
 ) -> dict[str, Any]:
     config_path = (REPO_ROOT / phase1_config).resolve() if not phase1_config.is_absolute() else phase1_config
     overrides = SimpleNamespace(
-        task="",
+        task=train_task,
         runner="",
         device="",
         num_envs=num_envs,
@@ -445,6 +610,23 @@ def _build_modal_spec(
         "generated_scenarios": [scenario.to_dict() for scenario in scenarios],
         "multiview_context": multiview_summary,
         "multiview_context_path": str(context_path),
+        "training_surface": {
+            "actual_modal_controls": {
+                "task": train_task,
+                "ppo.max_iterations": spec.get("train", {}).get("max_iterations"),
+                "ppo.num_envs": spec.get("train", {}).get("num_envs"),
+                "seed": spec.get("train", {}).get("seed"),
+            },
+            "research_directives": {
+                "reward_keys": sorted(key for key in patch.patch if key.startswith("reward_weights.")),
+                "actuator_keys": sorted(key for key in patch.patch if key.startswith("actuators.")),
+                "domain_randomization_keys": sorted(
+                    key for key in patch.patch if key.startswith("domain_randomization.")
+                ),
+                "terrain_keys": sorted(key for key in patch.patch if key.startswith("terrain.")),
+                "curriculum_keys": sorted(key for key in patch.patch if key.startswith("curriculum.")),
+            },
+        },
         "quick_iteration": {
             "num_envs": num_envs,
             "max_iterations": max_iterations,
@@ -514,6 +696,22 @@ def _write_json(path: Path, payload: Any) -> None:
 def _safe_name(value: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value).strip("_")
     return safe or "autoresearch_multiview"
+
+
+def _float_list(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    result: list[float] = []
+    for item in value:
+        try:
+            result.append(float(item))
+        except (TypeError, ValueError):
+            result.append(0.0)
+    return result
+
+
+def _safe_ratio(numerator: float, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
 
 
 def _float(value: Any, default: float = 0.0) -> float:

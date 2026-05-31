@@ -323,6 +323,17 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
         (artifact_root / "motion_context.json").write_text(
             json.dumps(spec["motion_context"], indent=2, sort_keys=True) + "\n"
         )
+    if spec.get("autoresearch"):
+        autoresearch_payload = spec["autoresearch"]
+        (artifact_root / "autoresearch_context.json").write_text(
+            json.dumps(autoresearch_payload, indent=2, sort_keys=True) + "\n"
+        )
+        (artifact_root / "generated_scenarios.json").write_text(
+            json.dumps(autoresearch_payload.get("generated_scenarios", []), indent=2, sort_keys=True) + "\n"
+        )
+        (artifact_root / "training_surface.json").write_text(
+            json.dumps(autoresearch_payload.get("training_surface", {}), indent=2, sort_keys=True) + "\n"
+        )
 
     h1_report_path = artifact_root / "h1_asset_report.json"
     h1_export_dir = artifact_root / "h1_asset_export"
