@@ -81,7 +81,7 @@ def _mutate_from_frontier(latest: dict[str, dict[str, Any]], seen_ids: set[str])
         for row in latest.values()
         if row.get("parent_scenario_id")
     }
-    for scenario_id, row in sorted(latest.items(), key=lambda item: float(item[1].get("difficulty") or 0.0)):
+    for scenario_id, row in sorted(latest.items(), key=_difficulty_sort_key):
         if scenario_id in expanded_parent_ids:
             continue
         success = _coerce_float(row.get("success_rate"))
@@ -251,6 +251,10 @@ def _next_scenario_id(kind: str, seen_ids: set[str]) -> str:
 
 def _scenario_kind(scenario_id: str) -> str:
     return re.sub(r"_v\d+$", "", scenario_id)
+
+
+def _difficulty_sort_key(item: tuple[str, dict[str, Any]]) -> float:
+    return float(item[1].get("difficulty") or 0.0)
 
 
 def _next_kind(kind: str) -> str:

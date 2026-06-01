@@ -30,7 +30,6 @@ TIMEOUT_SECONDS = 6 * 60 * 60
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REMOTE_SCRIPT_ROOT = Path("/robogenesis/isaac_scripts")
 REMOTE_H1_ASSET_ROOT = Path("/robogenesis/assets/unitree_h1")
-H1_TABLETOP_TASK_PREFIX = "RoboGenesis-H1-Tabletop"
 ISAAC_LAB_ROOT_CANDIDATES = (
     Path("/workspace/IsaacLab"),
     Path("/workspace/isaaclab"),
@@ -70,19 +69,11 @@ def _isaac_lab_root() -> Path:
     raise FileNotFoundError("Could not locate isaaclab.sh in the Isaac Lab image")
 
 
-def _is_h1_tabletop_task(task: str) -> bool:
-    return task.startswith(H1_TABLETOP_TASK_PREFIX)
-
-
 def _rsl_rl_train_script(task: str, runner: str) -> str:
-    if runner == "rsl_rl" and _is_h1_tabletop_task(task):
-        return str(REMOTE_SCRIPT_ROOT / "train_h1_tabletop_transfer.py")
     return f"scripts/reinforcement_learning/{runner}/train.py"
 
 
 def _rsl_rl_play_script(task: str, runner: str) -> str:
-    if runner == "rsl_rl" and _is_h1_tabletop_task(task):
-        return str(REMOTE_SCRIPT_ROOT / "play_h1_tabletop_transfer.py")
     return f"scripts/reinforcement_learning/{runner}/play.py"
 
 
@@ -214,8 +205,8 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-class _RaindropTaskManifest:
-    """Persist Modal-side stage timing so local artifact sync can publish it."""
+class _RunStageManifest:
+    """Persist Modal-side stage timing for local Raindrop replay/publishing."""
 
     def __init__(
         self,
@@ -320,59 +311,6 @@ class _RaindropTaskManifest:
 
 
 def _score_metrics(raw_metrics: dict[str, Any]) -> dict[str, Any]:
-    if raw_metrics.get("metric_family") == "manipulation":
-        collision_rate = _clamp01(raw_metrics.get("collision_rate", raw_metrics.get("fall_rate", 0.0)))
-        force_violation_rate = _clamp01(raw_metrics.get("force_violation_rate", 0.0))
-        safety_reasons: list[str] = []
-        if collision_rate > 0.35:
-            safety_reasons.append("collision or fall rate too high")
-        if force_violation_rate > 0.1:
-            safety_reasons.append("force violation rate too high")
-        if raw_metrics.get("evaluation_errors"):
-            safety_reasons.append("evaluation emitted errors")
-        if bool(raw_metrics.get("nan_actions", False)):
-            safety_reasons.append("policy produced NaN actions")
-
-        task_success = _clamp01(raw_metrics.get("task_success_rate", raw_metrics.get("success_rate", 0.0)))
-        task_progress = _clamp01(raw_metrics.get("task_progress", task_success))
-        contact_stability = _clamp01(raw_metrics.get("contact_stability", raw_metrics.get("contact_success_rate", 0.0)))
-        placement_accuracy = _clamp01(raw_metrics.get("placement_accuracy", 0.0))
-        generated_scenario_success = _clamp01(raw_metrics.get("generated_scenario_success", 0.0))
-        energy_efficiency = _clamp01(raw_metrics.get("energy_efficiency", 1.0))
-        smoothness = _clamp01(raw_metrics.get("smoothness", 1.0))
-        recovery_from_disturbance = _clamp01(raw_metrics.get("recovery_from_disturbance", 0.0))
-        safety_penalty = _clamp01(raw_metrics.get("safety_penalty", max(collision_rate, force_violation_rate) * 0.25))
-        regression_penalty = _clamp01(raw_metrics.get("regression_penalty", 0.0))
-        total_score = (
-            0.25 * task_success
-            + 0.15 * task_progress
-            + 0.15 * contact_stability
-            + 0.15 * placement_accuracy
-            + 0.10 * generated_scenario_success
-            + 0.08 * energy_efficiency
-            + 0.07 * smoothness
-            + 0.05 * recovery_from_disturbance
-            - safety_penalty
-            - regression_penalty
-        )
-        return {
-            **raw_metrics,
-            "command_tracking": task_progress,
-            "survival_no_fall": task_success,
-            "base_success": _clamp01(raw_metrics.get("base_success", task_success)),
-            "stability": contact_stability,
-            "gait_quality": placement_accuracy,
-            "generated_scenario_success": generated_scenario_success,
-            "energy_efficiency": energy_efficiency,
-            "smoothness": smoothness,
-            "recovery_from_disturbance": recovery_from_disturbance,
-            "safety_passed": not safety_reasons,
-            "safety_reasons": safety_reasons,
-            "safety_penalty": safety_penalty,
-            "regression_penalty": regression_penalty,
-            "total_score": max(0.0, min(1.0, total_score)),
-        }
-
     safety_reasons: list[str] = []
     if float(raw_metrics.get("fall_rate", 0.0)) > 0.35:
         safety_reasons.append("fall rate too high")
@@ -515,7 +453,7 @@ def phase1_baseline_job(experiment_spec_json: str) -> dict[str, Any]:
     eval_spec = dict(spec.get("eval", {}))
     render_spec = dict(spec.get("render", {}))
     artifact_root = _artifact_root(experiment_id)
-    task_manifest = _RaindropTaskManifest(
+    task_manifest = _RunStageManifest(
         artifact_root,
         experiment_id=experiment_id,
         event_name="robogenesis-sim-run",
@@ -912,7 +850,7 @@ def render_isaac_h1_video_job(render_spec_json: str) -> dict[str, Any]:
     runner = str(spec.get("runner", "rsl_rl"))
     checkpoint = str(spec.get("checkpoint", "latest"))
     artifact_root = _artifact_root(experiment_id)
-    task_manifest = _RaindropTaskManifest(
+    task_manifest = _RunStageManifest(
         artifact_root,
         experiment_id=experiment_id,
         event_name="robogenesis-sim-run",

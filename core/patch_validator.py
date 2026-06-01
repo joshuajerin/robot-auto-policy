@@ -19,11 +19,6 @@ ALLOWED_PATCH_PATHS = {
     "configs/locomotion/ppo.yaml",
     "configs/locomotion/terrain.yaml",
     "configs/locomotion/commands.yaml",
-    "configs/manipulation/rewards.yaml",
-    "configs/manipulation/curriculum.yaml",
-    "configs/manipulation/domain_randomization.yaml",
-    "configs/manipulation/objects.yaml",
-    "configs/manipulation/ppo.yaml",
 }
 
 LOCKED_PREFIXES = ("eval/", "modal_runner/", "artifacts/", "specs/")
@@ -39,17 +34,13 @@ PATCH_ROOT_TO_FILE = {
 }
 
 PATCH_ROOT_TO_FILES = {
-    "reward_weights": ["configs/locomotion/rewards.yaml", "configs/manipulation/rewards.yaml"],
-    "curriculum": ["configs/locomotion/curriculum.yaml", "configs/manipulation/curriculum.yaml"],
-    "domain_randomization": [
-        "configs/locomotion/domain_randomization.yaml",
-        "configs/manipulation/domain_randomization.yaml",
-    ],
+    "reward_weights": ["configs/locomotion/rewards.yaml"],
+    "curriculum": ["configs/locomotion/curriculum.yaml"],
+    "domain_randomization": ["configs/locomotion/domain_randomization.yaml"],
     "actuators": ["configs/locomotion/actuators.yaml"],
-    "ppo": ["configs/locomotion/ppo.yaml", "configs/manipulation/ppo.yaml"],
+    "ppo": ["configs/locomotion/ppo.yaml"],
     "terrain": ["configs/locomotion/terrain.yaml"],
     "commands": ["configs/locomotion/commands.yaml"],
-    "objects": ["configs/manipulation/objects.yaml"],
 }
 
 
@@ -160,8 +151,6 @@ def _is_safe_scalar_or_list(value: Any) -> bool:
 
 def _range_error(key: str, value: Any, target_file: str) -> str | None:
     if key.startswith("reward_weights."):
-        if target_file == "configs/manipulation/rewards.yaml":
-            return _numeric_range(key, value, 0.0, 12.0)
         return _numeric_range(key, value, 0.0, 2.0)
     if key.startswith("curriculum.roughness_"):
         return _numeric_range(key, value, 0.0, 0.25)
@@ -171,36 +160,8 @@ def _range_error(key: str, value: Any, target_file: str) -> str | None:
         return _numeric_range(key, value, -15.0, 15.0)
     if key.startswith("curriculum.command_velocity_"):
         return _numeric_range(key, value, 0.0, 3.0)
-    if key.startswith("curriculum.object_count_"):
-        return _numeric_range(key, value, 1, 16)
-    if key.startswith("curriculum.clutter_density_"):
-        return _numeric_range(key, value, 0.0, 1.0)
-    if key.startswith("curriculum.target_pose_randomization_"):
-        return _numeric_range(key, value, 0.0, 0.5)
-    if key.startswith("curriculum.occlusion_probability_"):
-        return _numeric_range(key, value, 0.0, 1.0)
-    if key.startswith("curriculum.object_mass_scale_"):
-        return _numeric_range(key, value, 0.1, 5.0)
-    if key.startswith("curriculum.bin_clearance_"):
-        return _numeric_range(key, value, 0.005, 0.3)
     if key == "domain_randomization.friction_range":
         return _numeric_pair_range(key, value, 0.2, 2.0)
-    if key == "domain_randomization.object_friction_range":
-        return _numeric_pair_range(key, value, 0.1, 2.0)
-    if key == "domain_randomization.object_mass_scale":
-        return _numeric_pair_range(key, value, 0.1, 5.0)
-    if key == "domain_randomization.object_scale_range":
-        return _numeric_pair_range(key, value, 0.5, 1.8)
-    if key == "domain_randomization.initial_pose_noise_m":
-        return _numeric_pair_range(key, value, 0.0, 0.25)
-    if key == "domain_randomization.target_pose_noise_m":
-        return _numeric_pair_range(key, value, 0.0, 0.2)
-    if key == "domain_randomization.arm_contact_force_scale":
-        return _numeric_pair_range(key, value, 0.3, 1.0)
-    if key == "domain_randomization.balance_margin_scale":
-        return _numeric_pair_range(key, value, 0.5, 1.0)
-    if key in {"domain_randomization.lighting_jitter", "domain_randomization.camera_noise"}:
-        return _numeric_range(key, value, 0.0, 1.0)
     if key == "domain_randomization.motor_strength_scale":
         return _numeric_pair_range(key, value, 0.5, 1.25)
     if key == "domain_randomization.action_delay_steps":
@@ -234,8 +195,6 @@ def _range_error(key: str, value: Any, target_file: str) -> str | None:
         return _numeric_pair_range(key, value, -3.0, 3.0)
     if key == "commands.yaw_velocity":
         return _numeric_pair_range(key, value, -2.0, 2.0)
-    if key == "objects.enabled_for_training":
-        return None if isinstance(value, bool) else f"{key} must be boolean"
     return f"unsupported patch parameter: {key}"
 
 

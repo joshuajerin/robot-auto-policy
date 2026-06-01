@@ -285,40 +285,8 @@ class MetricAccumulator:
             if "object_drop" in lower:
                 self.object_drop_terms.append(scalar)
 
-        if "RoboGenesis-H1-Tabletop" in self.task_name:
-            self._observe_h1_tabletop_obs(obs)
-
         if hasattr(dones, "sum"):
             self.fall_count += 0
-
-    def _observe_h1_tabletop_obs(self, obs: Any) -> None:
-        if not hasattr(obs, "shape") or len(obs.shape) != 2 or int(obs.shape[1]) < 79:
-            return
-        goal_delta = obs[:, 67:70]
-        left_tool_delta = obs[:, 73:76]
-        right_tool_delta = obs[:, 76:79]
-        root_height = obs[:, 0]
-        cube_height = root_height + obs[:, 66]
-
-        goal_error = goal_delta.norm(dim=1)
-        goal_y_error = goal_delta[:, 1].abs()
-        contact_dist = left_tool_delta.norm(dim=1).minimum(right_tool_delta.norm(dim=1))
-        task_success = (goal_error < 0.075).float()
-        task_progress = ((0.52 - goal_error) / 0.52).clamp(0.0, 1.0)
-        placement_accuracy = (-goal_error / 0.12).exp().clamp(0.0, 1.0)
-        contact_quality = (-contact_dist / 0.22).exp().clamp(0.0, 1.0)
-        robot_fall = (root_height < 0.58).float()
-        object_drop = (cube_height < 0.74).float()
-        object_slip = (goal_y_error / 0.52).clamp(0.0, 1.0)
-
-        self.task_success_terms.append(float(task_success.mean().item()))
-        self.task_progress_terms.append(float(task_progress.mean().item()))
-        self.contact_terms.append(float(contact_quality.mean().item()))
-        self.placement_terms.append(float(placement_accuracy.mean().item()))
-        self.placement_error_terms.append(float(goal_error.mean().item()))
-        self.object_slip_terms.append(float(object_slip.mean().item()))
-        self.robot_fall_terms.append(float(robot_fall.mean().item()))
-        self.object_drop_terms.append(float(object_drop.mean().item()))
 
     def observe_episodes(self, rewards: Any, lengths: Any, max_steps: int) -> None:
         if not hasattr(rewards, "numel") or rewards.numel() == 0:
@@ -340,57 +308,6 @@ class MetricAccumulator:
         smoothness = max(0.0, min(1.0, 1.0 - action_l2 / 2.5))
         energy_efficiency = max(0.0, min(1.0, 1.0 - action_l2 / 3.0))
         fall_rate = self.fall_count / episodes
-
-        if self.task_progress_terms or self.contact_terms or self.placement_terms:
-            task_success = _clamp01(_mean(self.task_success_terms, survival))
-            task_progress = _clamp01(_mean(self.task_progress_terms, task_success))
-            contact_stability = _clamp01(_mean(self.contact_terms, 0.0))
-            placement_accuracy = _clamp01(_mean(self.placement_terms, 0.0))
-            placement_error = max(0.0, _mean(self.placement_error_terms, 1.0))
-            object_slip_rate = _clamp01(_mean(self.object_slip_terms, 0.0))
-            collision_rate = _clamp01(_mean(self.collision_terms, 0.0))
-            force_violation_rate = _clamp01(_mean(self.force_violation_terms, 0.0))
-            robot_fall_rate = _clamp01(_mean(self.robot_fall_terms, fall_rate))
-            object_drop_rate = _clamp01(_mean(self.object_drop_terms, 0.0))
-            survival = max(0.0, min(1.0, 1.0 - max(robot_fall_rate, object_drop_rate)))
-            return {
-                "policy_id": self.policy_id,
-                "metric_family": "manipulation",
-                "episode_count": self.episode_count,
-                "eval_seed_count": self.seed_count,
-                "completed_eval_seed_count": self.completed_seed_count,
-                "evaluation_errors": self.evaluation_errors,
-                "mean_episode_reward": mean_reward,
-                "mean_episode_length": mean_length,
-                "task_success_rate": task_success,
-                "success_rate": task_success,
-                "task_progress": task_progress,
-                "contact_success_rate": contact_stability,
-                "contact_stability": contact_stability,
-                "placement_accuracy": placement_accuracy,
-                "placement_error_m": placement_error,
-                "object_slip_rate": object_slip_rate,
-                "collision_rate": collision_rate,
-                "force_violation_rate": force_violation_rate,
-                "robot_fall_rate": robot_fall_rate,
-                "object_drop_rate": object_drop_rate,
-                "generated_scenario_success": 0.0,
-                "energy_efficiency": energy_efficiency,
-                "smoothness": smoothness,
-                "recovery_from_disturbance": 0.0,
-                "command_tracking": task_progress,
-                "survival_no_fall": survival,
-                "base_success": task_success,
-                "stability": contact_stability,
-                "gait_quality": placement_accuracy,
-                "fall_rate": fall_rate,
-                "nan_actions": self.nan_actions,
-                "reward_hacking_detected": False,
-                "raw_metric_note": (
-                    "Manipulation metrics are rollout-derived from H1 tabletop transfer logs. "
-                    "Generated scenario robustness becomes nonzero after scenario evaluation is enabled."
-                ),
-            }
 
         return {
             "policy_id": self.policy_id,
@@ -471,35 +388,17 @@ class TraceRecorder:
             "actions": action_row,
             "extras_log": log,
         }
-        if _looks_like_h1_tabletop_trace(obs_row, log, task_name=self.task_name):
-            frame.update(
-                {
-                    "trace_family": "h1_tabletop_manipulation",
-                    "root_height": obs_row[0],
-                    "root_lin_vel": obs_row[1:4],
-                    "root_ang_vel": obs_row[4:7],
-                    "joint_pos": obs_row[7:26],
-                    "joint_vel": obs_row[26:45],
-                    "previous_actions": obs_row[45:64],
-                    "cube_relative_position": obs_row[64:67],
-                    "goal_relative_position": obs_row[67:70],
-                    "cube_velocity": obs_row[70:73],
-                    "left_tool_relative_position": obs_row[73:76],
-                    "right_tool_relative_position": obs_row[76:79],
-                }
-            )
-        else:
-            frame.update(
-                {
-                    "trace_family": "locomotion",
-                    "base_lin_vel": obs_row[0:3],
-                    "base_ang_vel": obs_row[3:6],
-                    "projected_gravity": obs_row[6:9],
-                    "velocity_command": obs_row[9:12],
-                    "joint_pos": obs_row[12:31],
-                    "joint_vel": obs_row[31:50],
-                }
-            )
+        frame.update(
+            {
+                "trace_family": "locomotion",
+                "base_lin_vel": obs_row[0:3],
+                "base_ang_vel": obs_row[3:6],
+                "projected_gravity": obs_row[6:9],
+                "velocity_command": obs_row[9:12],
+                "joint_pos": obs_row[12:31],
+                "joint_vel": obs_row[31:50],
+            }
+        )
         self.frames.append(frame)
 
     def write(self, path: Path, *, metrics: dict[str, Any]) -> None:
@@ -530,18 +429,6 @@ def _merged_scalar_logs(*, infos: dict[str, Any], env_extras: Any) -> dict[str, 
             if _to_scalar(value) is not None:
                 merged[str(key)] = value
     return merged
-
-
-def _looks_like_h1_tabletop_trace(obs_row: list[float], log: dict[str, Any], task_name: str = "") -> bool:
-    if "RoboGenesis-H1-Tabletop" in task_name:
-        return len(obs_row) >= 79
-    if len(obs_row) < 79:
-        return False
-    if any(key.startswith("task_") or key.startswith("placement_") or key.startswith("contact_") for key in log):
-        return True
-    # The custom H1 tabletop observation is exactly 79 values and reserves the
-    # final 15 values for cube, goal, cube velocity, and tool-relative vectors.
-    return len(obs_row) == 79
 
 
 def _to_scalar(value: Any) -> float | None:

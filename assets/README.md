@@ -8,16 +8,10 @@ Isaac Lab trains and evaluates the policy through the H1 task:
 Isaac-Velocity-Flat-H1-v0
 ```
 
-The repo can also vendor the public Unitree H1 USD bundle here:
+The repo vendors a compact public Unitree H1 USD bundle here:
 
 ```text
 assets/unitree_h1/usd/h1.usd
-```
-
-Fetch or refresh it with:
-
-```bash
-python tools/fetch_h1_model.py --output-dir assets/unitree_h1 --refresh
 ```
 
 The Modal runner bakes `assets/unitree_h1` into the image when it exists,

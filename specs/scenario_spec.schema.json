@@ -7,7 +7,7 @@
   "required": ["scenario_id", "task_family", "difficulty"],
   "properties": {
     "scenario_id": {"type": "string", "minLength": 1},
-    "task_family": {"type": "string", "enum": ["locomotion", "manipulation", "navigation", "aerial", "locomanipulation"]},
+    "task_family": {"type": "string", "enum": ["locomotion"]},
     "difficulty": {"type": "number", "minimum": 0.0, "maximum": 1.0},
     "terrain": {"type": "object"},
     "disturbances": {"type": "object"},

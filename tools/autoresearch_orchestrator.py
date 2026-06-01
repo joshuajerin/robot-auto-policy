@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from core.artifact_sync import sync_and_ingest_modal_experiment
-from core.orchestration import OrchestrationConfig, reconcile_modal_experiments, run_orchestration
+from core.orchestration import OrchestrationConfig, run_orchestration
 from modal_runner.deployed import DEFAULT_APP_NAME
 
 
@@ -29,7 +29,6 @@ def main() -> None:
     parser.add_argument("--video-length", type=int, default=60)
     parser.add_argument("--use-openai", action="store_true")
     parser.add_argument("--submit", action="store_true", help="Spawn jobs on the deployed Modal app.")
-    parser.add_argument("--reconcile", action="store_true", help="Poll Modal artifacts and update running DB rows.")
     parser.add_argument("--sync-artifacts", action="store_true", help="Download Modal artifacts and ingest them into SQLite.")
     parser.add_argument("--modal-volume", default="robogenesis-runs")
     parser.add_argument("--download-dir", default="artifacts/modal_downloads")
@@ -60,15 +59,6 @@ def main() -> None:
             for experiment_id in args.experiment_id
         ]
         print(json.dumps(results, indent=2, sort_keys=True))
-        return
-
-    if args.reconcile:
-        results = reconcile_modal_experiments(
-            Path(args.db),
-            experiment_ids=args.experiment_id or None,
-            volume=args.modal_volume,
-        )
-        print(json.dumps([result.to_dict() for result in results], indent=2, sort_keys=True))
         return
 
     config = OrchestrationConfig(

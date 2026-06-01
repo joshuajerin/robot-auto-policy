@@ -1,8 +1,7 @@
 """Smoke-test the RoboGenesis AutoResearch orchestration loop.
 
 This tool is intentionally lightweight: it can run the deterministic local
-AutoResearch loop, inspect the resulting SQLite research DB, and optionally
-verify Modal artifact readiness for real Isaac H1 phase-1 jobs.
+AutoResearch loop and inspect the resulting SQLite research DB.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from adapters.locomotion.scenario_generator import classify_frontier
 from core.autoresearch_loop import run_dry_research_loop
-from tools.modal_artifact_status import summarize_experiments
 
 
 def summarize_research_db(db_path: Path) -> dict[str, Any]:
@@ -142,12 +140,6 @@ def validate_summary(
     return blockers
 
 
-def build_modal_summary(volume: str, experiment_ids: list[str]) -> list[dict[str, Any]]:
-    if not experiment_ids:
-        return []
-    return [status.to_dict() for status in summarize_experiments(volume, experiment_ids)]
-
-
 def _latest_scenarios(rows: list[sqlite3.Row], *, limit: int) -> list[dict[str, Any]]:
     latest: list[dict[str, Any]] = []
     for row in rows[-limit:]:
@@ -183,8 +175,6 @@ def main() -> None:
     parser.add_argument("--min-scenarios", type=int, default=20)
     parser.add_argument("--min-max-difficulty", type=float, default=0.75)
     parser.add_argument("--min-parent-edges", type=int, default=8)
-    parser.add_argument("--modal-volume", default="robogenesis-runs")
-    parser.add_argument("--modal-experiment", action="append", default=[])
     args = parser.parse_args()
 
     db_path = Path(args.db)
@@ -204,19 +194,10 @@ def main() -> None:
         min_max_difficulty=args.min_max_difficulty,
         min_parent_edges=args.min_parent_edges,
     )
-    modal_statuses = build_modal_summary(args.modal_volume, args.modal_experiment)
-    modal_blockers = [
-        f"{status['experiment_id']}: {', '.join(status['review_blockers'])}"
-        for status in modal_statuses
-        if not status["ready_for_review"]
-    ]
-    blockers.extend(modal_blockers)
-
     payload = {
         "status": "pass" if not blockers else "fail",
         "blockers": blockers,
         "autoresearch": summary,
-        "modal_artifacts": modal_statuses,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
 

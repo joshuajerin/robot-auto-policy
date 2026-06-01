@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 
-TaskFamily = Literal["locomotion", "manipulation", "navigation", "aerial", "locomanipulation"]
+TaskFamily = Literal["locomotion"]
 ScenarioStatus = Literal["candidate", "validated", "too_easy", "learning_frontier", "too_hard", "invalid"]
 ExperimentStatus = Literal["proposed", "running", "completed", "accepted", "rejected", "failed"]
 

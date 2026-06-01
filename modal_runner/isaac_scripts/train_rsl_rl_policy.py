@@ -51,9 +51,6 @@ def train_policy(args_cli: argparse.Namespace) -> dict[str, Any]:
     from isaaclab_tasks.utils import parse_env_cfg
     from rsl_rl.runners import OnPolicyRunner
 
-    if args_cli.task.startswith("RoboGenesis-H1-Tabletop"):
-        import robogenesis_tasks  # noqa: F401
-
     env = None
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
     if args_cli.seed is not None:
@@ -160,12 +157,6 @@ def _apply_reward_weight(env_cfg: Any, name: str, value: Any, report: dict[str, 
     rewards = getattr(env_cfg, "rewards", None)
     if rewards is None:
         direct_aliases = {
-            "task_completion": "success_weight",
-            "placement_accuracy": "placement_weight",
-            "stable_object_motion": "progress_weight",
-            "object_stability": "object_height_weight",
-            "contact_quality": "reach_weight",
-            "secure_contact": "reach_weight",
             "torso_upright": "balance_weight",
             "stability": "balance_weight",
             "energy_penalty": "action_l2_penalty",
@@ -258,40 +249,6 @@ def _apply_domain_randomization(env_cfg: Any, name: str, value: Any, report: dic
         count = _set_push_velocity_ranges(env_cfg, velocity_range, report)
         if count == 0:
             report["unsupported"].append({"key": "domain_randomization.push_force_range_n", "reason": "no push velocity_range field found"})
-        return
-    if name == "object_friction_range":
-        material = getattr(getattr(getattr(env_cfg, "object_cfg", None), "spawn", None), "physics_material", None)
-        if material is None:
-            report["unsupported"].append(
-                {"key": "domain_randomization.object_friction_range", "reason": "object physics material not found"}
-            )
-            return
-        values = _range_tuple(value)
-        changed = []
-        if hasattr(material, "static_friction"):
-            old = getattr(material, "static_friction")
-            new = max(values)
-            setattr(material, "static_friction", new)
-            changed.append({"field": "object_cfg.spawn.physics_material.static_friction", "old": old, "new": new})
-        if hasattr(material, "dynamic_friction"):
-            old = getattr(material, "dynamic_friction")
-            new = min(values)
-            setattr(material, "dynamic_friction", new)
-            changed.append({"field": "object_cfg.spawn.physics_material.dynamic_friction", "old": old, "new": new})
-        if changed:
-            report["applied"].append(
-                {
-                    "key": "domain_randomization.object_friction_range",
-                    "target": "object_cfg.spawn.physics_material",
-                    "old": changed,
-                    "new": list(values),
-                    "note": "direct env uses deterministic material bounds; generated-scenario randomization can widen this later",
-                }
-            )
-            return
-        report["unsupported"].append(
-            {"key": "domain_randomization.object_friction_range", "reason": "object material has no friction fields"}
-        )
         return
     if name in {"motor_strength_scale", "action_delay_steps", "payload_mass_kg", "push_impulse_probability"}:
         report["unsupported"].append({"key": f"domain_randomization.{name}", "reason": "requires custom Isaac event term injection"})

@@ -1,11 +1,5 @@
 # Unitree H1 Asset Bundle
 
-This directory is populated by:
-
-```bash
-python tools/fetch_h1_model.py --output-dir assets/unitree_h1 --refresh
-```
-
 The files come from the official Unitree model repository:
 
 ```text
