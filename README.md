@@ -13,13 +13,13 @@ propose patch -> validate -> train/evaluate on Modal -> score -> accept/reject -
 
 Actual H1 Isaac camera rollout:
 
-<video src="docs/media/h1-isaac-camera-run.mp4" poster="docs/media/h1-isaac-camera-frame.png" controls muted loop width="760"></video>
+[![H1 Isaac camera rollout](docs/media/h1-isaac-camera-run.gif)](docs/media/h1-isaac-camera-run.mp4)
 
 [Open camera rollout MP4](docs/media/h1-isaac-camera-run.mp4)
 
 Telemetry rollout render from the same H1 policy pipeline:
 
-<video src="docs/media/h1-telemetry-rollout.mp4" controls muted loop width="760"></video>
+[![H1 telemetry rollout](docs/media/h1-telemetry-rollout.gif)](docs/media/h1-telemetry-rollout.mp4)
 
 [Open telemetry rollout MP4](docs/media/h1-telemetry-rollout.mp4)
 
